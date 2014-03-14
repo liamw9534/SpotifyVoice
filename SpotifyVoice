@@ -1,0 +1,272 @@
+#!/usr/bin/python -B
+
+"""
+SpotifyVoice
+
+Voice controlled command-line spotify music player using voice
+recognition.
+
+Copyright (c) 2014 All Right Reserved, Liam Wickins
+
+Please see the LICENSE file for more information.
+
+THIS CODE AND INFORMATION ARE PROVIDED "AS IS" WITHOUT WARRANTY OF ANY 
+KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
+PARTICULAR PURPOSE.
+"""
+import sys, time, readline, os, threading, codecs
+from optparse import OptionParser
+
+parser = OptionParser()
+parser.add_option("-u", "--user", dest="user",
+                  help="Spotify user name",
+                  action="store", type="string")
+parser.add_option("-p", "--pass", dest="password",
+                  help="Spotify password",
+                  action="store", type="string")
+parser.add_option("-q", "--quiet", dest="announce",
+                  help="Synthesizer announcements are suppressed",
+                  action="store_false", default=True)
+parser.add_option("-d", "--db", dest="database",
+                  help="ASR database for extending the database",
+                  action="store", type="string")
+parser.add_option("-m", "--model", dest="model",
+                  help="ASR model from database to use",
+                  action="store", type="string")
+(options, args) = parser.parse_args()
+
+
+# Required for local imported python modules
+sys.path.append("../ASRUtils")
+sys.path.append("../espeak.py")
+
+from SpotifyService import SpotifyService
+from MusicOutcome import MusicOutcome
+from SpotifySearch import SpotifySearch
+from PlayQueue import PlayQueue
+from ASRModel import ASRModel
+from ASR import ASR
+from TextToSpeech import TextToSpeech
+
+if (not options.user or not options.password):
+  print "You must have a Spotify account and token to use this program."
+  exit()
+
+if (not options.database or not options.model):
+  print "You must give ASR model and database information"
+  exit()
+
+class MusicASR(threading.Thread):
+
+  def __init__(self, database, model, wakeup=30.0):
+
+    threading.Thread.__init__(self)
+    self.asrModel = ASRModel(database, model)
+    self.__InitAsrInstance()
+    self.event = threading.Event()
+    self.stop = False
+    self.modelUpdated = False
+    self.wakeup = wakeup
+    self.start()
+
+  def __InitAsrInstance(self):
+    self.asrInst = ASR(self.__AsrCallback,
+                       hmm=self.__GetHmm(),
+                       lm=self.__GetLm(),
+                       dic=self.__GetDict())
+
+  def __AsrCallback(self, event, text, uttid):
+    if (event == 'result'):
+      self.asrText = text
+    else:
+      self.asrTimeout = 2.0
+
+  def WaitSpeech(self, timeout=2.0):
+
+    # Re-start ASR instance if the model has been updated
+    # FIXME: Would be better if double-buffer ASR instances were used
+    if (self.modelUpdated):
+      self.__InitAsrInstance()
+      self.modelUpdated = False
+
+    # Wait for ASR message or timeout
+    self.asrText = None
+    self.asrInst.Play()
+    self.asrTimeout = timeout
+    while self.asrTimeout > 0:
+      time.sleep(0.1)
+      self.asrTimeout -= 0.1
+      if (self.asrText):
+        break
+    self.asrInst.Pause()
+    if (self.asrText is None or self.asrTimeout == 0):
+      return None
+    else:
+      return self.asrText
+
+  def Add(self, track, artist):
+    self.asrModel.AddSentence(track)
+    self.asrModel.AddSentence(artist)
+
+  def run(self):
+    curr = len(self.asrModel.data.keys())
+    last = curr
+    while (not self.stop):
+      if (not self.event.wait(self.wakeup)):
+        self.asrModel.UpdateTraining()
+        curr = len(self.asrModel.data.keys())
+        if (curr != last):
+          self.asrModel.BuildModel()
+          self.modelUpdated = True
+          last = curr
+          print "New model:", self.asrModel.model
+      else:
+        self.event.clear()
+
+  def Exit(self):
+    self.stop = True
+    self.event.set()
+    self.join()
+
+  def __GetHmm(self):
+    return self.asrModel.model
+
+  def __GetLm(self):
+    return self.asrModel.lm
+
+  def __GetDict(self):
+    return self.asrModel.dict
+
+# Create client session and login
+m = SpotifyService()
+if (m.LoginUser(options.user, options.password) != 0):
+  m.Exit()
+  exit("Error: Failed to login to Spotify")
+
+# Initialize our music ASR
+asr = MusicASR(options.database, options.model, wakeup=60*10)
+
+trackCount = 0
+lastTrackCount = 0
+def NewTrackIndication():
+  global trackCount
+  trackCount += 1
+
+# Create play queue
+pq = PlayQueue(m, NewTrackIndication)
+
+# Create speech synthesizer
+synth = TextToSpeech()
+
+def AddTrainingData():
+  global lastTrackCount
+  if (trackCount != lastTrackCount):
+    lastTrackCount = trackCount
+    info = pq.GetCurrentTrackInfo()
+    if (info):
+      track = UnicodeToAscii(info['name'])
+      artist = m.GetArtistInfo(info['artists'][0])
+      artist = UnicodeToAscii(artist['name'])
+      asr.Add(track, artist)
+
+def UnicodeToAscii(u):
+  table = { 0x2018:0x27, 0x2019:0x27, 0x201C:0x22, 0x201D:0x22 }
+  return u.translate(table).encode('ascii', 'ignore')
+
+# Helper function to announce/show current track information
+def TrackInfo():
+  info = pq.GetCurrentTrackInfo()
+  if (info):
+    track = info['name']
+    artist = m.GetArtistInfo(info['artists'][0])
+    artist = artist['name']
+    text = UnicodeToAscii("Track : " + track + " : " + artist)
+    print text
+    if (options.announce):
+      synth.SpeakAndWaitUntilFinished(text)
+
+# Main application loop
+while True:
+
+  # Add any new training data
+  #AddTrainingData()
+
+  # Wait for ASR command
+  asrText = asr.WaitSpeech()
+
+  # Try to gather outcome information
+  if (asrText):
+
+    # ASR command should begin with 'COMMAND' which we strip off
+    if (asrText.startswith('COMMAND ')):
+      asrText = asrText[8:]
+    try:
+      outcome = MusicOutcome(asrText.lower())
+    except:
+      outcome = None
+      print "Was not able to parse request:", sys.exc_info()[0]
+
+    if (outcome):
+      intent = outcome.intent.name
+      entities = outcome.entities
+      print "<", intent, "> : <", entities, "> :", asrText
+    else:
+      intent = 'Uknown'
+      entities = None
+
+  else:
+    intent = 'Uknown'
+
+  if intent == 'play' and not entities:
+    pq.Play()
+    TrackInfo()
+    NewTrackIndication()
+  elif intent == 'stop':
+    pq.Stop()
+  elif intent == 'skip':
+    pq.SkipForward()
+    TrackInfo()
+    NewTrackIndication()
+  elif intent == 'back':
+    pq.SkipBack()
+    TrackInfo()
+    NewTrackIndication()
+  elif ((intent == 'search') or (intent == 'play' and entities) or
+        (intent == 'find' and entities)):
+    try:
+      q = SpotifySearch(entities, m)
+      print "Query =", q.query
+      search = q.GetQueryResults()
+    except:
+      print "Was not able to format query", sys.exc_info()[0]
+      search = None
+    if (search):
+      pq.Insert(search)
+      pq.Reset()
+      pq.Play()
+      TrackInfo()
+      NewTrackIndication()
+  elif intent == 'reset':
+    pq.Reset()
+  elif intent == 'clear':
+    pq.Clear()
+  elif intent == 'info':
+    print "Play queue at", pq.QueueIndex(), "with", pq.QueueSize(), "tracks."
+    TrackInfo()
+  elif intent == 'insert':
+    if (search):
+      pq.Insert(search)
+  elif intent == 'append':
+    if (search):
+      pq.Append(search)
+  elif intent == 'stats':
+    stats = m.GetStatistics()
+    print "Occupancy:", stats[2], "%", "Dropped:", stats[1]
+  elif intent == 'exit' or intent == 'quit':
+    break
+
+# Logout and delete session
+m.LogoutUser()
+m.Exit()
+asr.Exit()

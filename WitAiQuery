@@ -1,0 +1,91 @@
+#!/usr/bin/python -B
+
+"""
+WitAiQuery
+
+Copyright (c) 2014 All Right Reserved, Liam Wickins
+
+Please see the LICENSE file for more information.
+
+THIS CODE AND INFORMATION ARE PROVIDED "AS IS" WITHOUT WARRANTY OF ANY 
+KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
+PARTICULAR PURPOSE.
+"""
+
+import sys, time, os
+from optparse import OptionParser
+
+from WitAiSpeechDecode import WitAiSpeechDecode
+from WitAiQueryResponse import WitAiQueryResponse
+
+# Required for local imported python modules
+sys.path.append("../ASRUtils")
+
+from SpeechRecord import SpeechRecord
+
+parser = OptionParser()
+parser.add_option("-e", "--text", dest="text", help="AI query text string",
+                  action="store", type="string")
+parser.add_option("-f", "--file", dest="filename", help="Recorded wave file",
+                  action="store", default="output.wav", type="string")
+parser.add_option("-r", "--rate", dest="rate", help="Sampling rate (Hz)",
+                  action="store", default=44100, type="int")
+parser.add_option("-t", "--token", dest="token",
+                  help="Wit.AI token (hex-string)",
+                  action="store", type="string")
+parser.add_option("-k", "--keep", dest="keep",
+                  help="Keep wave file (do not delete)",
+                  action="store_true", default=False)
+(options, args) = parser.parse_args()
+
+# Ensure mandatory options are supplied
+if (not options.token):
+  print "You must have a Wit.AI account and token to use this program."
+  print "Please see http://wit.ai for more information"
+  exit()
+
+# Record some speech if we are not sending text
+if (not options.text):
+  print "* Recording"
+  while (True):
+    r = SpeechRecord(rate=options.rate)
+    r.StartRecord()
+    while (not r.IsRecordComplete()):
+      info = r.GetRecordingInfo()
+      print "Size:", info[0], "RMS:", info[1]
+      time.sleep(0.5)
+    if (info[0] > 0):
+      break
+  r.WriteFileAndClose(options.filename)
+
+# Decode that speech to text
+d = WitAiSpeechDecode(options.token)
+if (not options.text):
+  try:
+    resp = d.DecodeWaveFile(options.filename)
+  except:
+    print "Was not able to decode speech waveform:", sys.exc_info()[0]
+    exit()
+else:
+  try:
+    resp = d.PostTextString(options.text)
+  except:
+    print "Was not able to post text string:", sys.exc_info()[0]
+    exit()
+
+# Delete waveform file
+if (not options.text and not options.keep):
+  try:
+    os.remove(options.filename)
+  except:
+    print "Was not able to delete .wav file", sys.exc_info()[0]
+
+# Display the message and response 
+print "Id =", resp.GetMsgId()
+print "Body =", resp.GetMsgBody()
+print "Raw =", resp.GetRaw()
+outcome = resp.GetOutcome()
+print "Intent =", outcome.intent.name
+print "Entities =", outcome.entities
+print "Confidence =", outcome.confidence

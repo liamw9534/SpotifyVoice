@@ -1,0 +1,109 @@
+"""
+MusicOutcome
+
+Defines a grammar for parsing user inputs in relation to a "music outcome".
+
+The results are provided using a WitAiOutcome for compatibility with the
+WitAi service.  This is useful so as to keep the application software
+independent of the underlying implementation approach.
+
+Copyright (c) 2014 All Right Reserved, Liam Wickins
+
+Please see the LICENSE file for more information.
+
+THIS CODE AND INFORMATION ARE PROVIDED "AS IS" WITHOUT WARRANTY OF ANY 
+KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
+PARTICULAR PURPOSE.
+"""
+
+from GrammarParser import GrammarParser
+from WitAiBase import *
+
+class MusicOutcomeUnableToExtractIntent:
+  pass
+
+class MusicOutcome(WitAiOutcome):
+  """MusicOutcome extends WitAiOutcome by implementing a grammar parser
+     for music outcomes based on user input."""
+
+  def __init__(self, sent):
+    """Invokes the music outcome parsing and creates the parent object
+       for WitAiOutcome based on the results obtained.
+       An exception is raised if the parser could not find a good match
+       to the grammar.  This probably means the user intended something
+       else, or the grammar is not good enough."""
+
+    # Extend this list to support more music outcome application commands
+    cmd = "(back|skip|stop|pause|resume|play|insert|append|reset|clear|preview|quit|exit|stats|info)"
+    x = " (.+)"
+    xna = "(.+!artist!track!album)"
+    search = "(find|search|play)"  # Special command for building music queries
+    year = " (year)" 
+    to = " (to)"
+    by = " (by)"
+    frm = " (from)"
+    artist = " (artist)"
+    album = " (album)"
+    genre = " (genre)"
+    track = " (track)"
+
+    # The grammar set for music outcomes.  The ordering is important because
+    # of greedy regexp matching when using wildcards.  There, ensure that
+    # more specific queries are put at the top of the list first to avoid
+    # getting false matches
+    grammar = [
+      ("^"+search+artist+x+"$", 'V_N_x', [] ),
+      ("^"+search+track+x+by+artist+x+"$", 'V_N_x_IN_N_x', [] ),
+      ("^"+search+track+x+by+x+"$", 'V_N_x_IN_x', ['artist'] ),
+      ("^"+search+track+x+artist+x+"$", 'V_N_x_N_x', [] ),
+      ("^"+search+track+x+"$", 'V_N_x', [] ),
+      ("^"+search+genre+x+"$", 'V_N_x', [] ),
+      ("^"+search+album+x+by+x+"$", 'V_N_x_IN_x', [ 'artist' ] ),
+      ("^"+search+album+x+"$", 'V_N_x', [] ),
+      ("^"+search+year+x+to+x+"$", 'V_N_x_IN_x', ['year_to'] ),
+      ("^"+search+year+x+"$", 'V_N_x', [] ),
+      ("^"+search+x+by+artist+x+"$", 'V_x_IN_N_x', ['query'] ),
+      ("^"+search+x+by+x+"$", 'V_x_IN_x', ['query', 'artist'] ),
+      ("^"+search+x+frm+album+x+"$", 'V_x_IN_N_x', ['query'] ),
+      ("^"+search+x+frm+genre+x+"$", 'V_x_IN_N_x', ['query'] ),
+      ("^"+search+x+frm+year+x+to+x+"$", 'V_x_IN_N_x_IN_x', ['query'] ),
+      ("^"+search+x+frm+year+x+"$", 'V_x_IN_N_x', ['query']),
+      ("^"+search+x+year+x+to+x+"$", 'V_x_N_x_IN_x', ['query', 'year_to']),
+      ("^"+search+x+year+x+"$", 'V_x_N_x', ['query'] ),
+      ("^"+search+x+artist+x+"$", 'V_x_N_x', ['query'] ),
+      ("^"+search+x+album+x+"$", 'V_x_N_x', ['query'] ),
+      ("^"+search+x+genre+x+"$", 'V_x_N_x', ['query'] ),
+      ("^"+search+x+frm+x+"$", 'V_x_IN_x', ['track', 'album']),
+      ("^"+search+xna+"$", 'V_x', ['query']),
+      ("^"+cmd+"$", 'V', [])
+    ]
+
+    # Create grammar parser and parse the sentence
+    parser = GrammarParser(grammar)
+    result = parser.parse(sent)
+
+    # Only proceed if we got a result
+    if (result):
+
+      # Extract the intent aka verb
+      intent = result['verb']
+
+      # Extract all entities (don't take 'verb')
+      entities = []
+      for i in [x for x in result.keys() if x != 'verb']:
+        entities.append(WitAiEntity(i, result[i]))
+
+      # Since we are using a strict grammar parser, the confidence is 1.0
+      # anything that doesn't match is essentially confidence 0.0 but we
+      # don't bother with that and just raise an exception
+      confidence = 1.0
+
+      # Create the WitAiOutcome (for compatibility with WitAi)
+      WitAiOutcome.__init__(self, entities, intent, confidence)
+
+    else:
+
+      # The grammar doesn't support the query that the user made
+      raise MusicOutcomeUnableToExtractIntent
+

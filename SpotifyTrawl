@@ -1,0 +1,186 @@
+#!/usr/bin/python -B
+
+"""
+SpotifyTrawl
+
+Build a music corpus of albums, artists, tracks, and playlists.
+
+Copyright (c) 2014 All Right Reserved, Liam Wickins
+
+Please see the LICENSE file for more information.
+
+THIS CODE AND INFORMATION ARE PROVIDED "AS IS" WITHOUT WARRANTY OF ANY 
+KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
+PARTICULAR PURPOSE.
+"""
+
+import sys, os, codecs, re
+from optparse import OptionParser
+from SpotifyService import SpotifyService
+
+parser = OptionParser()
+parser.add_option("-u", "--user", dest="user",
+                  help="Spotify user name",
+                  action="store", type="string")
+parser.add_option("-p", "--pass", dest="password",
+                  help="Spotify password",
+                  action="store", type="string")
+parser.add_option("-c", "--corpus", dest="corpus",
+                  help="Name of corpus file",
+                  action="store", type="string")
+parser.add_option("-s", "--session", dest="session",
+                  help="Session file for resumption from last position",
+                  action="store", type="string")
+parser.add_option("-q", "--query", dest="query",
+                  help="Initial query to run",
+                  action="store", type="string")
+parser.add_option("-m", "--max", dest="max",
+                  help="Max number of search results (default 1000)",
+                  action="store", default=100, type="int")
+(options, args) = parser.parse_args()
+
+if (not options.user or not options.password):
+  print "You must have a Spotify account and token to use this program."
+  exit()
+
+if (not options.corpus):
+  print "You must give a corpus"
+  exit()
+
+# Create client session and login
+try:
+  m = SpotifyService()
+  if (m.LoginUser(options.user, options.password) != 0):
+    m.Exit()
+    exit("Error: Failed to login to Spotify")
+except IOError:
+  print "Could not start spotify service - missing spotify app. key?"
+  exit()
+
+def UnicodeToAscii(u):
+  table = { 0x2018:0x27, 0x2019:0x27, 0x201C:0x22, 0x201D:0x22 }
+  return u.translate(table).encode('ascii', 'ignore')
+
+# The following algorithm recursively explores and finds all
+# artists, tracks, albums and playlists given an initial starting query.
+# It continues to explore until no further search queries are found and
+# outputs all entires to a user-defined corpus file.
+# Results are written incrementally to the corpus file.
+# Duplicate searches and entries are avoided by using hash tables.
+
+albums = {}
+playlists = {}
+tracks = {}
+artists = {}
+queries = {}
+totalHits = 0
+
+def Tag(h, k, props=[]):
+  k = UnicodeToAscii(k)
+  try:
+    h[k]['refs'] += 1
+  except:
+    h[k] = { 'refs': 1 }
+  for i in props:
+    p = i[0]
+    v = i[1]
+    h[k][p] = UnicodeToAscii(v)
+
+def ExpandTracks(items):
+  global tracks
+  for i in items:
+    t = m.GetTrackInfo(i)
+    a = m.GetAlbumInfo(t['album'])
+    b = m.GetArtistInfo(t['artists'][0])
+    Tag(tracks, t['name'], [('album', a['name']), ('artist', b['name'])])
+    ExpandArtists(t['artists'])
+    ExpandAlbums([t['album']])
+
+def ExpandAlbums(items):
+  global albums
+  for i in items:
+    a = m.GetAlbumInfo(i)
+    b = m.GetArtistInfo(a['artist'])
+    Tag(albums, a['name'], [('artist', b['name'])])
+    ExpandArtists([a['artist']])
+
+def ExpandArtists(items):
+  global artists
+  for i in items:
+    a = m.GetArtistInfo(i)
+    Tag(artists, a['name'])
+
+def ExpandPlaylists(items):
+  pass
+
+def AlbumQuery(a):
+  return u"album:"+'"'+a+'"'
+
+def ArtistQuery(a):
+  return u"artist:"+'"'+a+'"'
+  
+def MakeNewQuery():
+  global queries, albums, artists
+  a = [i for i in albums.keys() if AlbumQuery(i) not in queries.keys()]
+  if (a):
+    return AlbumQuery(a[0])
+  a = [i for i in artists.keys() if ArtistQuery(i) not in queries.keys()]
+  if (a):
+    return ArtistQuery(a[0])
+  return None
+
+def Sanitize(text):
+
+  text = text.replace('P!nk', 'Pink')
+  text = text.replace('Ke$ha', 'Kesha')
+  text = text.replace(' & ', ' and ')
+  text = text.replace('/', ',')
+  text = text.replace('[', '')
+  text = text.replace(']', '')
+  text = text.replace('#', '')
+
+  return text
+
+query = u""+options.query
+maxResults = options.max
+timeout = 10
+
+while (not query is None):
+
+  Tag(queries, query)
+  result = m.SearchNew(query, maxCount=maxResults, timeout=timeout)
+  if (result):
+    info = m.GetSearchInfo(result)
+    print "Search:", query, "is_loaded:", info['is_loaded'], "returned:", (info['track_total'], info['album_total'], info['artist_total'], info['playlist_total'])
+    if (info):
+      ExpandTracks(info['tracks'])
+      ExpandAlbums(info['albums'])
+      ExpandArtists(info['artists'])
+      ExpandPlaylists(info['playlists'])
+    aggregate = len(tracks.keys()) + len(albums.keys()) + \
+                len(artists.keys()) + len(playlists.keys())
+    print "Aggregate:", aggregate
+    if (aggregate >= options.max):
+      break
+    query = MakeNewQuery()
+  else:
+    print "No more results found"
+    break
+
+with open(options.corpus, 'w') as fd:
+  for i in tracks.keys():
+    print >>fd, "TRACK", Sanitize(i)
+    print >>fd, "TRACK", Sanitize(i), "FROM ALBUM", Sanitize(tracks[i]['album'])
+    print >>fd, "TRACK", Sanitize(i), "FROM", Sanitize(tracks[i]['album'])
+    print >>fd, "TRACK", Sanitize(i), "BY ARTIST", Sanitize(tracks[i]['artist'])
+    print >>fd, "TRACK", Sanitize(i), "BY", Sanitize(tracks[i]['artist'])
+  for i in albums.keys():
+    print >>fd, "ALBUM", Sanitize(i)
+    print >>fd, "ALBUM", Sanitize(i), "BY ARTIST", Sanitize(albums[i]['artist'])
+    print >>fd, "ALBUM", Sanitize(i), "BY", Sanitize(albums[i]['artist'])
+  for i in artists.keys():
+    print >>fd, "ARTIST", Sanitize(i)
+
+m.LogoutUser()
+m.Exit()
