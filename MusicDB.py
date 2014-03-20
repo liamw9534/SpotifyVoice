@@ -91,6 +91,15 @@ class MusicDB():
       print "Failed:", cmd
       raise
 
+  def FindAll(self, context="tracks"):
+    """Returns a list of hashes for all items"""
+    cmd = "SELECT * FROM "+context
+    try:
+      self.curs.execute(cmd)
+    except:
+      print "Failed:", cmd
+      raise
+
   def FindUri(self, track=None, artist=None, album=None, yearFrom=None, yearTo=None, query=None):
     """Returns a list of URIs for all items matching the name"""
     base = "SELECT tracks.uri FROM tracks JOIN artists ON artists.uri=tracks.artistUri JOIN albums ON albums.uri=tracks.albumUri WHERE "
