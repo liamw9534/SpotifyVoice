@@ -27,7 +27,7 @@ class MusicOutcome(WitAiOutcome):
   """MusicOutcome extends WitAiOutcome by implementing a grammar parser
      for music outcomes based on user input."""
 
-  def __init__(self, sent):
+  def __init__(self, sent, confidence=0.0):
     """Invokes the music outcome parsing and creates the parent object
        for WitAiOutcome based on the results obtained.
        An exception is raised if the parser could not find a good match
@@ -54,8 +54,10 @@ class MusicOutcome(WitAiOutcome):
     # getting false matches
     grammar = [
       ("^"+search+artist+x+"$", 'V_N_x', [] ),
+      ("^"+search+track+x+frm+album+x+"$", 'V_N_x_IN_N_x', [] ),
       ("^"+search+track+x+by+artist+x+"$", 'V_N_x_IN_N_x', [] ),
       ("^"+search+track+x+by+x+"$", 'V_N_x_IN_x', ['artist'] ),
+      ("^"+search+track+x+frm+x+"$", 'V_N_x_IN_x', ['album'] ),
       ("^"+search+track+x+artist+x+"$", 'V_N_x_N_x', [] ),
       ("^"+search+track+x+"$", 'V_N_x', [] ),
       ("^"+search+genre+x+"$", 'V_N_x', [] ),
@@ -75,7 +77,7 @@ class MusicOutcome(WitAiOutcome):
       ("^"+search+x+album+x+"$", 'V_x_N_x', ['query'] ),
       ("^"+search+x+genre+x+"$", 'V_x_N_x', ['query'] ),
       ("^"+search+x+frm+x+"$", 'V_x_IN_x', ['track', 'album']),
-      ("^"+search+xna+"$", 'V_x', ['query']),
+      ("^"+search+x+"$", 'V_x', ['query']),
       ("^"+cmd+"$", 'V', [])
     ]
 
@@ -93,11 +95,6 @@ class MusicOutcome(WitAiOutcome):
       entities = []
       for i in [x for x in result.keys() if x != 'verb']:
         entities.append(WitAiEntity(i, result[i]))
-
-      # Since we are using a strict grammar parser, the confidence is 1.0
-      # anything that doesn't match is essentially confidence 0.0 but we
-      # don't bother with that and just raise an exception
-      confidence = 1.0
 
       # Create the WitAiOutcome (for compatibility with WitAi)
       WitAiOutcome.__init__(self, entities, intent, confidence)

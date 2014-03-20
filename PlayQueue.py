@@ -13,6 +13,8 @@ IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 PARTICULAR PURPOSE.
 """
 
+import spotify
+
 class PlayQueue():
 
   def __init__(self, session, callback=None):
@@ -28,15 +30,10 @@ class PlayQueue():
       self.userCallback()
 
   def Insert(self, results):
-    info = self.session.GetSearchInfo(results)
-    tracks = info['tracks']
-    k = list(tracks) + self.queue
-    self.queue = k
+    self.queue = results + self.queue
 
   def Append(self, results):
-    info = self.session.GetSearchInfo(results)
-    tracks = info['tracks']
-    self.queue += tracks
+    self.queue += results
 
   def QueueIndex(self):
     return self.index
@@ -46,7 +43,8 @@ class PlayQueue():
 
   def GetCurrentTrackInfo(self):
     if (self.index < len(self.queue)):
-      return self.session.GetTrackInfo(self.queue[self.index])
+      t = spotify.Track(self.queue[self.index]).load()
+      return self.session.GetTrackInfo(t)
 
   def Clear(self):
     self.Stop()
@@ -62,7 +60,9 @@ class PlayQueue():
   def SkipBack(self):
     self.index -= 1
     if (self.index < 0):
-      self.index = len(self.queue)-1
+      if (len(self.queue) > 0):
+        self.index = len(self.queue)-1
+      self.index = 0
     self.Play()
 
   def SkipForward(self):
@@ -73,8 +73,9 @@ class PlayQueue():
 
   def Play(self):
     self.Stop()
-    if (self.index < len(self.queue)):
-      self.session.PlayTrack(self.queue[self.index])
+    if (self.index < len(self.queue) and len(self.queue) > 0):
+      t = spotify.Track(self.queue[self.index]).load()
+      self.session.PlayTrack(t)
 
   def __repr__(self):
     return repr(self.__dict__)

@@ -3,7 +3,7 @@
 """
 SpotifyTrawl
 
-Build a music corpus of albums, artists, tracks, and playlists.
+Build a music database of albums, artists, tracks, and playlists.
 
 Copyright (c) 2014 All Right Reserved, Liam Wickins
 
@@ -15,9 +15,11 @@ IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 PARTICULAR PURPOSE.
 """
 
+from __future__ import division
 import sys, os, codecs, re
 from optparse import OptionParser
 from SpotifyService import SpotifyService
+from MusicDB import MusicDB
 
 parser = OptionParser()
 parser.add_option("-u", "--user", dest="user",
@@ -26,14 +28,14 @@ parser.add_option("-u", "--user", dest="user",
 parser.add_option("-p", "--pass", dest="password",
                   help="Spotify password",
                   action="store", type="string")
-parser.add_option("-c", "--corpus", dest="corpus",
-                  help="Name of corpus file",
-                  action="store", type="string")
-parser.add_option("-s", "--session", dest="session",
-                  help="Session file for resumption from last position",
+parser.add_option("-d", "--db", dest="dbfile",
+                  help="Database file",
                   action="store", type="string")
 parser.add_option("-q", "--query", dest="query",
                   help="Initial query to run",
+                  action="store", type="string")
+parser.add_option("-s", "--state", dest="state",
+                  help="Query state file",
                   action="store", type="string")
 parser.add_option("-m", "--max", dest="max",
                   help="Max number of search results (default 1000)",
@@ -44,8 +46,12 @@ if (not options.user or not options.password):
   print "You must have a Spotify account and token to use this program."
   exit()
 
-if (not options.corpus):
-  print "You must give a corpus"
+# Create connection to music database
+if (options.dbfile):
+  db = MusicDB(options.dbfile)
+  db.CreateTables() # Only created if the database is new
+else:
+  print "You must specify a database file"
   exit()
 
 # Create client session and login
@@ -62,125 +68,193 @@ def UnicodeToAscii(u):
   table = { 0x2018:0x27, 0x2019:0x27, 0x201C:0x22, 0x201D:0x22 }
   return u.translate(table).encode('ascii', 'ignore')
 
-# The following algorithm recursively explores and finds all
-# artists, tracks, albums and playlists given an initial starting query.
-# It continues to explore until no further search queries are found and
-# outputs all entires to a user-defined corpus file.
-# Results are written incrementally to the corpus file.
-# Duplicate searches and entries are avoided by using hash tables.
-
-albums = {}
-playlists = {}
-tracks = {}
-artists = {}
-queries = {}
-totalHits = 0
-
-def Tag(h, k, props=[]):
-  k = UnicodeToAscii(k)
-  try:
-    h[k]['refs'] += 1
-  except:
-    h[k] = { 'refs': 1 }
-  for i in props:
-    p = i[0]
-    v = i[1]
-    h[k][p] = UnicodeToAscii(v)
-
 def ExpandTracks(items):
-  global tracks
+  global tracks, db
   for i in items:
     t = m.GetTrackInfo(i)
     a = m.GetAlbumInfo(t['album'])
     b = m.GetArtistInfo(t['artists'][0])
-    Tag(tracks, t['name'], [('album', a['name']), ('artist', b['name'])])
+    db.AddTrack(Sanitize(t['name']), t['link'].uri, a['link'].uri, b['link'].uri)
     ExpandArtists(t['artists'])
     ExpandAlbums([t['album']])
+  return len(items)
 
 def ExpandAlbums(items):
-  global albums
+  global albums, db
   for i in items:
     a = m.GetAlbumInfo(i)
     b = m.GetArtistInfo(a['artist'])
-    Tag(albums, a['name'], [('artist', b['name'])])
+    db.AddAlbum(Sanitize(a['name']), a['link'].uri, a['year'], b['link'].uri)
     ExpandArtists([a['artist']])
+  return len(items)
 
 def ExpandArtists(items):
-  global artists
+  global artists, db
   for i in items:
     a = m.GetArtistInfo(i)
-    Tag(artists, a['name'])
+    db.AddArtist(Sanitize(a['name']), a['link'].uri)
+  return len(items)
 
 def ExpandPlaylists(items):
-  pass
+  return len(items)
 
-def AlbumQuery(a):
-  return u"album:"+'"'+a+'"'
+def YearToText(text):
+  numTable = {
+    '0':'ZERO',
+    '1':'ONE',
+    '2':'TWO',
+    '3':'THREE',
+    '4':'FOUR',
+    '5':'FIVE',
+    '6':'SIX',
+    '7':'SEVEN',
+    '8':'EIGHT',
+    '9':'NINE',
+    '00':'HUNDRED AND',
+    '10':'TEN',
+    '11':'ELEVEN',
+    '12':'TWELVE',
+    '13':'THIRTEEN',
+    '14':'FOURTEEN',
+    '15':'FIFTEEN',
+    '16':'SIXTEEN',
+    '17':'SEVENTEEN',
+    '18':'EIGHTEEN',
+    '19':'NINETEEN',
+    '20':'TWENTY',
+    '30':'THIRTY',
+    '40':'FORTY',
+    '50':'FIFTY',
+    '60':'SIXTY',
+    '70':'SEVENTY',
+    '80':'EIGHTY',
+    '90':'NINETY' }
 
-def ArtistQuery(a):
-  return u"artist:"+'"'+a+'"'
+  def TUConv(num):
+    if (num in numTable.keys()):
+      return numTable[num]
+    else:
+      return numTable[num[0]+'0']+' '+numTable[num[1]]
+
+  while (True):
+    res = re.findall('[!0-9]*([1-9][0-9])([0-9][0-9])[!0-9]*', text)
+    if (res):
+      a = str(res[0][0])
+      b = str(res[0][1])
+      text = text.replace(a, TUConv(a)+' ')
+      text = text.replace(b, TUConv(b))
+    else:
+      break
+  return text
+
+def IterativeReplace(text, this, that):
+  old = text
+  while (True):
+    text = text.replace(this, that)
+    if (text == old): break
+    old = text
+  return text
   
-def MakeNewQuery():
-  global queries, albums, artists
-  a = [i for i in albums.keys() if AlbumQuery(i) not in queries.keys()]
-  if (a):
-    return AlbumQuery(a[0])
-  a = [i for i in artists.keys() if ArtistQuery(i) not in queries.keys()]
-  if (a):
-    return ArtistQuery(a[0])
-  return None
-
 def Sanitize(text):
 
-  text = text.replace('P!nk', 'Pink')
-  text = text.replace('Ke$ha', 'Kesha')
-  text = text.replace(' & ', ' and ')
-  text = text.replace('/', ',')
-  text = text.replace('[', '')
-  text = text.replace(']', '')
-  text = text.replace('#', '')
+  text = UnicodeToAscii(text).strip()
+  text = IterativeReplace(text, 'P!nk', 'Pink')
+  text = IterativeReplace(text, 'Ke$ha', 'Kesha')
+  text = IterativeReplace(text, '&', ' and ')
+  text = IterativeReplace(text, '/', ' ')
+  text = IterativeReplace(text, '[', ' ')
+  text = IterativeReplace(text, ']', ' ')
+  text = IterativeReplace(text, '(', ' ')
+  text = IterativeReplace(text, ')', ' ')
+  text = IterativeReplace(text, '#', '')
+  text = IterativeReplace(text, '!', '')
+  text = IterativeReplace(text, '^', '')
+  text = IterativeReplace(text, '%', '')
+  text = IterativeReplace(text, '$', '')
+  text = IterativeReplace(text, '+', ' and ')
+  text = IterativeReplace(text, '"', '')
+  text = IterativeReplace(text, '..', '')
+  text = IterativeReplace(text, '-', ' ')
+  text = IterativeReplace(text, '~', ' ')
+  text = IterativeReplace(text, '|', ' ')
+  text = IterativeReplace(text, ':', ' ')
+  text = IterativeReplace(text, '    ', ' ')
+  text = IterativeReplace(text, '   ', ' ')
+  text = IterativeReplace(text, '  ', ' ')
+
+  #text = YearToText(text)
 
   return text
 
 query = u""+options.query
 maxResults = options.max
 timeout = 10
+trackOffset = 0
+albumOffset = 0
+artistOffset = 0
+playlistOffset = 0
 
+# Read starting counter offsets from state file if it exists
+if (options.state):
+  try:
+    with open(options.state, 'r') as f:
+      vals = []
+      for line in f:
+        vals.append(int(line.strip()))  # Each entry is an int counter offset
+      if (len(vals) == 4):  # Must have four entries to be valid
+        trackOffset = vals[0]     # Order is implicit mapping like thus
+        albumOffset = vals[1]
+        artistOffset = vals[2]
+        playlistOffset = vals[3]
+      else:
+        print "Invalid state file:", options.state
+      f.close()
+  except:
+    print "Was unable to load the state file:", options.state
+    pass
+
+# The following algorithm explores and finds all
+# artists, tracks, albums and playlists given an initial starting query.
+# It continues to explore until no further search queries are found and
+# outputs all entires to a given database file.
+
+print "Query:", query
 while (not query is None):
 
-  Tag(queries, query)
-  result = m.SearchNew(query, maxCount=maxResults, timeout=timeout)
+  result = m.SearchNew(query, trackOffset=trackOffset, albumOffset=albumOffset,
+                              artistOffset=artistOffset,
+                              playlistOffset=playlistOffset,
+                              maxCount=maxResults, timeout=timeout)
   if (result):
     info = m.GetSearchInfo(result)
-    print "Search:", query, "is_loaded:", info['is_loaded'], "returned:", (info['track_total'], info['album_total'], info['artist_total'], info['playlist_total'])
-    if (info):
-      ExpandTracks(info['tracks'])
-      ExpandAlbums(info['albums'])
-      ExpandArtists(info['artists'])
-      ExpandPlaylists(info['playlists'])
-    aggregate = len(tracks.keys()) + len(albums.keys()) + \
-                len(artists.keys()) + len(playlists.keys())
-    print "Aggregate:", aggregate
-    if (aggregate >= options.max):
+    #print "Search:", query, "is_loaded:", info['is_loaded'], "returned:", (info['track_total'], info['album_total'], info['artist_total'], info['playlist_total'])
+    if (info and info['track_total'] > 0):
+      trackOffset += ExpandTracks(info['tracks'])
+      albumOffset += ExpandAlbums(info['albums'])
+      artistOffset += ExpandArtists(info['artists'])
+      playlistOffset += ExpandPlaylists(info['playlists'])
+      print "t=",trackOffset, "/", info['track_total'], \
+            "a=",albumOffset, "/", info['album_total'], \
+            "r=",artistOffset, "/", info['artist_total']
+    if (trackOffset >= options.max or
+        (trackOffset == info['track_total'] and
+         albumOffset == info['album_total'] and
+         artistOffset == info['artist_total'])):
+      print "All results found"
       break
-    query = MakeNewQuery()
   else:
     print "No more results found"
     break
 
-with open(options.corpus, 'w') as fd:
-  for i in tracks.keys():
-    print >>fd, "TRACK", Sanitize(i)
-    print >>fd, "TRACK", Sanitize(i), "FROM ALBUM", Sanitize(tracks[i]['album'])
-    print >>fd, "TRACK", Sanitize(i), "FROM", Sanitize(tracks[i]['album'])
-    print >>fd, "TRACK", Sanitize(i), "BY ARTIST", Sanitize(tracks[i]['artist'])
-    print >>fd, "TRACK", Sanitize(i), "BY", Sanitize(tracks[i]['artist'])
-  for i in albums.keys():
-    print >>fd, "ALBUM", Sanitize(i)
-    print >>fd, "ALBUM", Sanitize(i), "BY ARTIST", Sanitize(albums[i]['artist'])
-    print >>fd, "ALBUM", Sanitize(i), "BY", Sanitize(albums[i]['artist'])
-  for i in artists.keys():
-    print >>fd, "ARTIST", Sanitize(i)
+# Write updated state file
+if (options.state):
+  with open(options.state, 'w') as f:
+    print >>f, str(trackOffset)
+    print >>f, str(albumOffset)
+    print >>f, str(artistOffset)
+    print >>f, str(playlistOffset)
+    f.close()
 
 m.LogoutUser()
 m.Exit()
+db.Exit()

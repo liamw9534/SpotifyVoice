@@ -1,0 +1,95 @@
+#!/usr/bin/python -B
+
+"""
+GenCorpus
+
+Build a music corpus of albums, artists, tracks, and playlists from
+an existing database.
+
+Copyright (c) 2014 All Right Reserved, Liam Wickins
+
+Please see the LICENSE file for more information.
+
+THIS CODE AND INFORMATION ARE PROVIDED "AS IS" WITHOUT WARRANTY OF ANY 
+KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
+PARTICULAR PURPOSE.
+"""
+
+from __future__ import division
+import sys, os, codecs, re
+from optparse import OptionParser
+from MusicDB import MusicDB
+
+parser = OptionParser()
+parser.add_option("-c", "--corpus", dest="corpus",
+                  help="Name of corpus file",
+                  action="store", type="string")
+parser.add_option("-d", "--db", dest="dbfile",
+                  help="Database file",
+                  action="store", type="string")
+(options, args) = parser.parse_args()
+
+if (options.corpus):
+  fd = open(options.corpus, 'w')
+else:
+  print "No corpus file given, using stdout instead"
+  fd = sys.stdout
+
+# Create connection to music database
+if (options.dbfile):
+  db = MusicDB(options.dbfile)
+  db.CreateTables()
+else:
+  print "No database file given"
+  exit()
+
+def Name(i):
+  """Given a database item return the name field"""
+  return i['name'].upper()
+
+def Artist(i):
+  """Given a database item, look-up the artist and return its name"""
+  global db
+  uri = i['artistUri']
+  k = db.FindByUri(uri, context="artists")
+  return Name(k[0])
+
+def Album(i):
+  """Given a database item, look-up the album and return its name"""
+  global db
+  uri = i['albumUri']
+  k = db.FindByUri(uri, context="albums")
+  return Name(k[0])
+  
+# Query the database
+tracks = db.FindAll(context="tracks")
+albums = db.FindAll(context="albums")
+artists = db.FindAll(context="artists")
+
+verbList = [ 'PLAY', 'FIND', 'SEARCH' ]
+for v in verbList:
+
+  for i in tracks:
+    print >>fd, v, Name(i)
+    print >>fd, v, Name(i), "BY", Artist(i)
+    print >>fd, v, Name(i), "FROM", Album(i)
+    print >>fd, v, Name(i), "FROM ALBUM", Album(i)
+    print >>fd, v, Name(i), "BY ARTIST", Artist(i)
+    print >>fd, v, "TRACK", Name(i)
+    print >>fd, v, "TRACK", Name(i), "BY", Artist(i)
+    print >>fd, v, "TRACK", Name(i), "FROM", Album(i)
+    print >>fd, v, "TRACK", Name(i), "FROM ALBUM", Album(i)
+    print >>fd, v, "TRACK", Name(i), "BY ARTIST", Artist(i)
+  for i in albums:
+    print >>fd, v, Name(i)
+    print >>fd, v, Name(i), "BY", Artist(i)
+    print >>fd, v, Name(i), "BY ARTIST", Artist(i)
+    print >>fd, v, "ALBUM", Name(i)
+    print >>fd, v, "ALBUM", Name(i), "BY", Artist(i)
+    print >>fd, v, "ALBUM", Name(i), "BY ARTIST", Artist(i)
+  for i in artists:
+    print >>fd, v, Name(i)
+    print >>fd, v, "ARTIST", Name(i)
+
+db.Exit()

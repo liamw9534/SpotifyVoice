@@ -3,12 +3,24 @@
 # Utility for building music database corpus and ASR model
 
 Usage() {
-  echo "Usage: $0 username password db_name"
+  echo "Usage: $0 asr_db_name music_db_name [file_tag] [nrec]"
 }
 
-if [ "$#" -lt 3 ] ; then
+if [ "$#" -lt 2 ] ; then
   Usage
   exit
+fi
+
+if [ -z "$3" ]; then
+  TAG='none'
+else
+  TAG=$3
+fi
+
+if [ -z "$4" ]; then
+  NREC=0
+else
+  NREC=$4
 fi
 
 if [ "$ASRMODELS" == "" ]; then
@@ -16,23 +28,26 @@ if [ "$ASRMODELS" == "" ]; then
   exit
 fi
 
-USER=$1
-PASS=$2
-DB=$3
-OUTDIR=$ASRMODELS/$DB/output
-# Make this number bigger for creating larger databases
-MAX=500
-# Setup to 'addcorpus' (text) or 'sreccorpus' (speech)
-#RECORD=addcorpus
-RECORD=sreccorpus
+ASRDB=$1
+MUSICDB=$2
+OUTDIR=$ASRMODELS/$ASRDB/output
+ASRDBCREATED=0
+
+# ASRTrain commands
+RECORD=recfile
+ADD=appendfile
+
 # Set to 'echo' when debugging (will not call commands), empty otherwise
 #DEBUG=echo
 DEBUG=
 
 InitDatabase() {
-  echo exit > Init.asr
-  $DEBUG ../ASRUtils/ASRTrain -s $DB -f Init.asr
-  rm Init.asr
+  if [ ! -d "$OUTDIR" ]; then
+    echo exit > Init.asr
+    $DEBUG ../ASRUtils/ASRTrain -s $ASRDB -f Init.asr
+    rm Init.asr
+    ASRDBCREATED=1
+  fi
 }
 
 CorpusFile() {
@@ -40,52 +55,60 @@ CorpusFile() {
 }
 
 AddCorpus() {
-  echo $RECORD $(CorpusFile $1) >> $OUTDIR/$DB.asr
+  echo $ADD $(CorpusFile $1) >> $OUTDIR/$ASRDB.asr
+}
+
+RecCorpus() {
+  if [ "$2" -gt 0 ]; then
+    echo $RECORD $(CorpusFile $1) $2 >> $OUTDIR/$ASRDB.asr
+  elif [ "$2" -lt 0 ]; then
+    echo $RECORD $(CorpusFile $1) >> $OUTDIR/$ASRDB.asr
+  fi
 }
 
 AddTrainingData() {
-  echo update >> $OUTDIR/$DB.asr
-  echo build >> $OUTDIR/$DB.asr
-  echo info >> $OUTDIR/$DB.asr
-  echo exit >> $OUTDIR/$DB.asr
-  $DEBUG ../ASRUtils/ASRTrain -s $DB -f $OUTDIR/$DB.asr
+  echo update >> $OUTDIR/$ASRDB.asr
+  echo build >> $OUTDIR/$ASRDB.asr
+  echo info >> $OUTDIR/$ASRDB.asr
+  echo exit >> $OUTDIR/$ASRDB.asr
+  echo 'Updating model...'
+  $DEBUG ../ASRUtils/ASRTrain -s $ASRDB -f $OUTDIR/$ASRDB.asr
+  echo 'Done'
 }
 
-SpotifyTrawl() {
-  $DEBUG ./SpotifyTrawl -u $USER -p $PASS -q $1 -c $(CorpusFile $1) -m $MAX
-}
-
-AddGenre() {
-  CORPUS=genre:"$*"
-  AddCorpus $CORPUS
-  SpotifyTrawl $CORPUS
-}
-
-AddYear() {
-  CORPUS=year:$1
-  AddCorpus $CORPUS
-  SpotifyTrawl $CORPUS
+GenCorpus() {
+  echo 'Extracting corpus from database...'
+  $DEBUG ./GenCorpus -d $MUSICDB -c $(CorpusFile $1)
+  echo 'Done'
 }
 
 AddCommands() {
-  CORPUS=Commands
-  AddCorpus $CORPUS
-  AddTrainingData
+  if [ "$ASRDBCREATED" == "1" ]; then
+    cp Commands.corpus $(CorpusFile Commands)
+    CORPUS=Commands
+    AddCorpus $CORPUS
+    RecCorpus $CORPUS $NREC
+  fi
 }
 
+MakeCorpus() {
+  CORPUS=$1
+  AddCorpus $CORPUS
+  RecCorpus $CORPUS $NREC
+  GenCorpus $CORPUS
+}
+  
 # Create database if it doesn't exist
 InitDatabase
 
 # Clear the script before starting
->$OUTDIR/$DB.asr
+>$OUTDIR/$ASRDB.asr
 
 # Make commands corpus file
-cp Commands.corpus $(CorpusFile Commands)
-
-# Modify to add/remove years
-YEARS='1980 1981 1982 1983 1984 1985 1986 1987 1988 1989 1990 1991 1992 1993 1994 1995 1996 1997 1998 1999 2000 2001 2002 2003 2004 2005 2006 2007 2008 2009 2010 2011 2012 2013 2014'
-#YEARS="1980"
-for y in $YEARS; do
-  AddYear $y
-done
 AddCommands
+
+# Year span
+MakeCorpus $TAG
+
+# Complete
+AddTrainingData

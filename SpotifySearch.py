@@ -24,25 +24,61 @@ class SpotifySearch():
                       'year', 'year_to', 'excluding_year', 'label',
                       'excluding_year_from', 'excluding_year_to' ]
 
-  def __init__(self, entities, session):
+  def __init__(self, entities, session, offline=False, musicDb=None):
 
     for e in entities:
       if e.name not in self.allowedEntities:
         raise SearchQueryInvalidEntityException
     self.entities = entities
     self.session = session
-    self.query = self.__BuildQuery()
-    self.__InitiateQuery()
+    self.musicDb = musicDb
+    self.offline = offline
+    if (not offline):
+      self.query = self.__BuildQuery()
+      self.__InitiateRemoteQuery()
+    if (self.musicDb):
+      self.__InitiateLocalQuery()
 
   def __QuoteString(self, s):
     return '"'+str(s)+'"'
 
   def GetQueryResults(self, timeout=3):
-    results = self.session.WaitForSearch(timeout)
-    return results
+    results = []
+    if (self.musicDb):
+      resp = self.musicDb.GetResults()
+      results += [t['uri'] for t in resp]
+    if (not self.offline):
+      resp = self.session.WaitForSearch(timeout)
+      if (resp):
+        info = self.session.GetSearchInfo(resp)
+        results += [t.link.uri for t in info['tracks']]
+    return list(set(results))  # Use a set to remove any duplicate entries
 
-  def __InitiateQuery(self):
+  def __InitiateRemoteQuery(self):
     self.search = self.session.SearchNew(self.query, wait=False)
+
+  def __InitiateLocalQuery(self):
+
+    (artist, track, album, yearFrom, yearTo, query) = \
+      (None, None, None, None, None, None)
+    for e in self.entities:
+      if e.name == 'artist':
+        artist = e.value
+      elif e.name == 'album':
+        album = e.value
+      elif e.name == 'track':
+        track = e.value
+      elif e.name == 'year':
+        yearFrom = e.value
+      elif e.name == 'year from':
+        yearFrom = e.value
+      elif e.name == 'year to':
+        yearTo = e.value
+      elif e.name == 'query':
+        query = str(e.value)
+
+    self.musicDb.FindUri(track=track, album=album, artist=artist,
+                         yearFrom=yearFrom, yearTo=yearTo, query=query)
 
   def __BuildQuery(self):
     query = ""
