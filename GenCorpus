@@ -52,20 +52,25 @@ def Artist(i):
   """Given a database item, look-up the artist and return its name"""
   global db
   uri = i['artistUri']
-  k = db.FindByUri(uri, context="artists")
+  db.FindByUri(uri, context="artists")
+  k = db.GetResults()
   return Name(k[0])
 
 def Album(i):
   """Given a database item, look-up the album and return its name"""
   global db
   uri = i['albumUri']
-  k = db.FindByUri(uri, context="albums")
+  db.FindByUri(uri, context="albums")
+  k = db.GetResults()
   return Name(k[0])
   
 # Query the database
-tracks = db.FindAll(context="tracks")
-albums = db.FindAll(context="albums")
-artists = db.FindAll(context="artists")
+db.FindAll(context="tracks")
+tracks = db.GetResults()
+db.FindAll(context="albums")
+albums = db.GetResults()
+db.FindAll(context="artists")
+artists = db.GetResults()
 
 verbList = [ 'PLAY', 'FIND', 'SEARCH' ]
 for v in verbList:
