@@ -168,7 +168,10 @@ if (m.LoginUser(options.user, options.password) != 0):
 asr = MusicASR(options.asrDatabase, options.model, options.fsg)
 
 # Create offline music database connection
-db = MusicDB(options.musicDatabase)
+if (options.musicDatabase):
+  db = MusicDB(options.musicDatabase)
+else:
+  db = None
 
 trackCount = 0
 lastTrackCount = 0
