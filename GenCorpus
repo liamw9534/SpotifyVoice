@@ -73,6 +73,9 @@ db.FindAll(context="artists")
 artists = db.GetResults()
 
 verbList = [ 'PLAY', 'FIND', 'SEARCH' ]
+START = '<S>'
+END = '</S>'
+
 for v in verbList:
 
   for i in tracks:

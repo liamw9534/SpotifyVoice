@@ -31,6 +31,7 @@ class AudioStream():
     self.channels = channels
     self.width = width
     self.buffer = buf
+    self.streamPaused = False
 
     # Create threading event for paAbort event delivery
     self.abortEvent = threading.Event()
@@ -44,7 +45,10 @@ class AudioStream():
 
     # Consume data from the buffer -- we may not get what we requested
     wanted = frameCount * self.channels * self.width
-    opData = self.buffer.Read(wanted)
+    if (self.streamPaused):
+      opData = self.__GenerateSilence(wanted)
+    else:
+      opData = self.buffer.Read(wanted)
 
     # Track any underrun events
     if (statusFlags == pyaudio.paOutputUnderflow):
@@ -63,11 +67,24 @@ class AudioStream():
 
   def Start(self):
     """Start the audio stream playing"""
+    self.Resume()
     self.defaultFlag = pyaudio.paContinue    # Used by callback handler
     self.stream.start_stream()
 
+  def __GenerateSilence(self, wanted):
+    return chr(0) * wanted
+
+  def Pause(self):
+    """Pause audio stream"""
+    self.streamPaused = True
+
+  def Resume(self):
+    """Resume audio stream"""
+    self.streamPaused = False
+
   def Stop(self, wait=True, timeout=1):
     """Stop the audio stream playing"""
+    self.Pause()                             # Do not output normal frames
     self.defaultFlag = pyaudio.paAbort       # Used by callback handler
     # The caller is optionally allowed to wait for the paAbort event being
     # delivered to PyAudio which means it is safe to stop the stream

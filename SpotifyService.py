@@ -288,6 +288,14 @@ class SpotifyService():
       self.WaitForStop(timeout)
       self.__WaitForAudioDelivery(timeout)
 
+  def Pause(self):
+    if (self.stream):
+      self.stream.Pause()
+
+  def Resume(self):
+    if (self.stream):
+      self.stream.Resume()
+
   def __BytesToSamples(self, nBytes):
       """Helper function to convert nBytes to nSamples"""
       divisor = (self.audioFormat['width'] * self.audioFormat['channels'])

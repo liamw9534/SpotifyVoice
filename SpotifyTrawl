@@ -154,6 +154,17 @@ def IterativeReplace(text, this, that):
     if (text == old): break
     old = text
   return text
+
+def AbbreviationReplace(text):
+  patt = "('\w+)"
+  res = re.findall(patt, text)
+  for r in res:
+    text = IterativeReplace(text, r, r[1:])
+  patt = "(\w+')"
+  res = re.findall(patt, text)
+  for r in res:
+    text = IterativeReplace(text, r, r[:-1])
+  return text 
   
 def Sanitize(text):
 
@@ -166,8 +177,13 @@ def Sanitize(text):
   text = IterativeReplace(text, ']', ' ')
   text = IterativeReplace(text, '(', ' ')
   text = IterativeReplace(text, ')', ' ')
+  text = IterativeReplace(text, '<', '')
+  text = IterativeReplace(text, '>', '')
+  text = IterativeReplace(text, '{', '')
+  text = IterativeReplace(text, '}', '')
   text = IterativeReplace(text, '#', '')
   text = IterativeReplace(text, '!', '')
+  text = IterativeReplace(text, '*', '')
   text = IterativeReplace(text, '^', '')
   text = IterativeReplace(text, '%', '')
   text = IterativeReplace(text, '$', '')
@@ -178,9 +194,13 @@ def Sanitize(text):
   text = IterativeReplace(text, '~', ' ')
   text = IterativeReplace(text, '|', ' ')
   text = IterativeReplace(text, ':', ' ')
+  text = IterativeReplace(text, ';', ' ')
+  text = IterativeReplace(text, '=', ' equals ')
+  text = IterativeReplace(text, ',', ' ')
   text = IterativeReplace(text, '    ', ' ')
   text = IterativeReplace(text, '   ', ' ')
   text = IterativeReplace(text, '  ', ' ')
+  text = AbbreviationReplace(text)
 
   #text = YearToText(text)
 

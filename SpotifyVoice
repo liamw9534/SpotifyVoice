@@ -40,8 +40,10 @@ parser.add_option("-a", "--asr", dest="asrDatabase",
 parser.add_option("-m", "--model", dest="model",
                   help="ASR model from database to use",
                   action="store", type="string")
+parser.add_option("-f", "--fsg", dest="fsg",
+                  help="ASR finite state grammar to use",
+                  action="store", type="string")
 (options, args) = parser.parse_args()
-
 
 # Required for local imported python modules
 sys.path.append("../ASRUtils")
@@ -61,103 +63,91 @@ if (not options.user or not options.password):
   exit()
 
 if (not options.asrDatabase or not options.model):
-  print "You have not given a local ASR model - using Google ASR instead"
+  print "You have not given a local ASR model - only remote will be used"
+
+if (options.fsg):
+  print "You are using a finite state grammar:", options.fsg
 
 class MusicASR():
 
-  def __init__(self, database, model):
+  def __init__(self, database, model, fsg):
 
+    self.asrList = []
+    self.asrQueue = []
+    self.event = threading.Event()
     if (database and model):
       self.asrModel = ASRModel(database, model)
-      self.asrInst = ASR(self.__AsrCallback,
-                         hmm=self.__GetHmm(),
-                         lm=self.__GetLm(),
-                         dic=self.__GetDict())
-    else:
-      self.asrInst = ASRGoogleAPI(self.__AsrCallback, timeout=1)
+      self.asrList.append((ASR(self.__AsrCallback,
+                               hmm=self.__GetHmm(),
+                               lm=self.__GetLm(),
+                               dic=self.__GetDict(),
+                               fsg=fsg,
+                               wordLimit=2,
+                               tag='cmu'), 'cmu'))
 
-    # Start ASR instance listening
-    self.asrInst.Play()
+    self.asrList.append((ASRGoogleAPI(self.__AsrCallback, tag='google', timeout=1), 'google'))
 
-  def __AsrCallback(self, event, text, nbest):
+  def __AsrPlay(self):
+    for asr,tag in self.asrList:
+      asr.Play()
+
+  def __AsrPause(self):
+    for asr,tag in self.asrList:
+      asr.Pause()
+
+  def __AsrFlush(self):
+    for asr,tag in self.asrList:
+      asr.Flush()
+
+  def __AsrExit(self):
+    for asr,tag in self.asrList:
+      asr.Exit()
+
+  def __AsrCallback(self, event, tag, best):
     if (event == 'result'):
-      self.best = text
-      self.nbest = nbest
-    else:
-      self.asrTimeout = 2.0
+      print "ASR", tag, "returned:", best
+      self.asrQueue += best
+      self.event.set()
 
-  def WaitSpeechOutcome(self, timeout=2.0):
+  def WaitSpeechOutcome(self, timeout=None):
 
     # Wait for ASR message or timeout
-    self.best = None
-    self.nbest = None
-    self.asrTimeout = timeout
-    while self.asrTimeout > 0:
-      time.sleep(0.1)
-      self.asrTimeout -= 0.1
-      if (self.best):
+    resp = None
+    self.asrQueue = []
+    self.event.clear()
+    self.__AsrPlay()
+    while (True):
+      if (self.event.wait(timeout)):
+        self.event.clear()
+        resp = self.__DecodeOutcome(self.asrQueue)
+        if (resp): break
+      else:
         break
+    self.__AsrFlush()
+    return resp
+
+  def __DecodeOutcome(self, items):
 
     # Look at the best entry and quickly check if it's a command
-    if (self.best):
+    for s in items:
       #print "*** Best: ", self.best, "N-Best:", self.nbest
-      s = self.best
       p = 1.0
       try:
+        #print "Trying:", s
         if (s.startswith('COMMAND ')):
           # Strip off 'COMMAND' prefix since this is merely a 'cue'
           outcome = MusicOutcome(s.lower()[8:], confidence=p)
         else:
           outcome = MusicOutcome(s.lower(), confidence=p)
+        #print "Outcome:", outcome
         if (outcome is not None):
           return outcome
       except:
         pass
-
     return None
 
-  def __SearchASRModelCorpus(self):
-
-    # Only process if we have nbest entries to look at
-    res = {}
-    if (self.nbest is not None):
-      # Go through n-best options found by ASR and match them against
-      # the music corpus loaded
-      for i in self.nbest:
-        if (i):
-          # Favour options that match our database exactly from start first
-          matches = self.asrModel.FindStartsWith(i)
-
-          # Iterate through matches
-          for id,s in matches:
-            try:
-              # Handle the outcome parsing
-              p = len(i.split(' ')) / len(s.split(' '))
-              if (s.startswith('COMMAND ')):
-                # Strip off 'COMMAND' prefix since this is merely a 'cue'
-                outcome = MusicOutcome(s.lower()[8:], confidence=p)
-              else:
-                outcome = MusicOutcome(s.lower(), confidence=p)
-              if (outcome is not None):
-                # Compute probability based on word count match, store outcome
-                res[s] = { 'p':p, 'outcome':outcome }
-                #return outcome
-            except:
-              pass
-
-    # Get highest probability entry
-    k = (None, 0)
-    for i in res.keys():
-      if (res[i]['p'] > k[1]):
-        k = (res[i]['outcome'], res[i]['p'])
-
-    if (len(res.keys()) > 0):
-      print "Checked", len(res.keys()), "different outcomes..."
-
-    return k[0]
-
   def Exit(self):
-    self.asrInst.Exit()
+    self.__AsrExit()
 
   def __GetHmm(self):
     return self.asrModel.model
@@ -175,7 +165,7 @@ if (m.LoginUser(options.user, options.password) != 0):
   exit("Error: Failed to login to Spotify")
 
 # Initialize our music ASR
-asr = MusicASR(options.asrDatabase, options.model)
+asr = MusicASR(options.asrDatabase, options.model, options.fsg)
 
 # Create offline music database connection
 db = MusicDB(options.musicDatabase)
@@ -239,13 +229,13 @@ while True:
     NewTrackIndication()
   elif ((intent == 'search') or (intent == 'play' and entities) or
         (intent == 'find' and entities)):
-    #try:
-    q = SpotifySearch(entities, m, musicDb=db, offline=False)
-    print "Submitting query..."
-    results = q.GetQueryResults()
-    #except:
-    #  print "Was not able to format query", sys.exc_info()[0]
-    #  results = []
+    try:
+      q = SpotifySearch(entities, m, musicDb=db, offline=False)
+      print "Submitting query..."
+      results = q.GetQueryResults()
+    except:
+      print "Was not able to format query", sys.exc_info()[0]
+      results = []
     numTracks = len(results)
     print "Search returned", numTracks, "tracks..."
     if (intent == 'play' and numTracks > 0):
@@ -260,6 +250,10 @@ while True:
       pq.Append(results)
   elif intent == 'reset':
     pq.Reset()
+  elif intent == 'pause':
+    pq.Pause()
+  elif intent == 'resume':
+    pq.Resume()
   elif intent == 'clear':
     pq.Clear()
   elif intent == 'info':

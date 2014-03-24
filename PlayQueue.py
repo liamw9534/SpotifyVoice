@@ -57,6 +57,12 @@ class PlayQueue():
   def Stop(self):
     self.session.Stop()
 
+  def Pause(self):
+    self.session.Pause()
+
+  def Resume(self):
+    self.session.Resume()
+
   def SkipBack(self):
     self.index -= 1
     if (self.index < 0):

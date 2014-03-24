@@ -63,11 +63,11 @@ class SpotifySearch():
       (None, None, None, None, None, None)
     for e in self.entities:
       if e.name == 'artist':
-        artist = e.value
+        artist = e.value.replace("'", "''")
       elif e.name == 'album':
-        album = e.value
+        album = e.value.replace("'", "''")
       elif e.name == 'track':
-        track = e.value
+        track = e.value.replace("'", "''")
       elif e.name == 'year':
         yearFrom = e.value
       elif e.name == 'year from':
@@ -75,7 +75,7 @@ class SpotifySearch():
       elif e.name == 'year to':
         yearTo = e.value
       elif e.name == 'query':
-        query = str(e.value)
+        query = str(e.value).replace("'", "''")
 
     self.musicDb.FindUri(track=track, album=album, artist=artist,
                          yearFrom=yearFrom, yearTo=yearTo, query=query)
