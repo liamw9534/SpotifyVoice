@@ -20,6 +20,10 @@ from __future__ import division
 import sys, time, readline, os, threading, codecs
 from optparse import OptionParser
 from MusicDB import MusicDB
+from SpotifyService import SpotifyService
+from MusicOutcome import MusicOutcome
+from SpotifySearch import SpotifySearch
+from PlayQueue import PlayQueue
 
 parser = OptionParser()
 parser.add_option("-u", "--user", dest="user",
@@ -45,18 +49,21 @@ parser.add_option("-f", "--fsg", dest="fsg",
                   action="store", type="string")
 (options, args) = parser.parse_args()
 
-# Required for local imported python modules
+# Required for ASR utilities
 sys.path.append("../ASRUtils")
-sys.path.append("../espeak.py")
 
-from SpotifyService import SpotifyService
-from MusicOutcome import MusicOutcome
-from SpotifySearch import SpotifySearch
-from PlayQueue import PlayQueue
 from ASRModel import ASRModel
 from ASR import ASR
 from ASRGoogleAPI import ASRGoogleAPI
-from TextToSpeech import TextToSpeech
+
+# Required for E-Speak python module
+if (options.announce):
+
+  sys.path.append("../espeak.py")
+  from TextToSpeech import TextToSpeech
+
+  # Create speech synthesizer
+  synth = TextToSpeech()
 
 if (not options.user or not options.password):
   print "You must have a Spotify account and token to use this program."
@@ -75,6 +82,10 @@ class MusicASR():
     self.asrList = []
     self.asrQueue = []
     self.event = threading.Event()
+
+    # ASR database and language model are optional for command and control
+    # Enabling this makes local look-ups happen faster and improves the
+    # end-user experience
     if (database and model):
       self.asrModel = ASRModel(database, model)
       self.asrList.append((ASR(self.__AsrCallback,
@@ -82,8 +93,12 @@ class MusicASR():
                                lm=self.__GetLm(),
                                dic=self.__GetDict(),
                                fsg=fsg,
-                               wordLimit=2,
+                               wordLimit=2, # Restrict commands to two words
                                tag='cmu'), 'cmu'))
+
+    # Remote Google instance should always be enabled, it has a much
+    # higher latency than the local ASR but is able to cope with very
+    # much more complex utterances more reliably
 
     self.asrList.append((ASRGoogleAPI(self.__AsrCallback, tag='google', timeout=1), 'google'))
 
@@ -105,33 +120,35 @@ class MusicASR():
 
   def __AsrCallback(self, event, tag, best):
     if (event == 'result'):
-      print "ASR", tag, "returned:", best
       self.asrQueue += best
-      self.event.set()
+      self.event.set()   # Wake up pending speech timeout
 
   def WaitSpeechOutcome(self, timeout=None):
 
-    # Wait for ASR message or timeout
+    # Clear queues and enable the ASR engines
     resp = None
     self.asrQueue = []
     self.event.clear()
     self.__AsrPlay()
-    while (True):
-      if (self.event.wait(timeout)):
-        self.event.clear()
-        resp = self.__DecodeOutcome(self.asrQueue)
-        if (resp): break
-      else:
-        break
+
+    # Wait for ASR message or timeout
+    while (self.event.wait(timeout)):
+      self.event.clear()
+      # ASR queue will contain all viable utterances so far, decode them...
+      resp = self.__DecodeOutcome(self.asrQueue)
+      if (resp): # Returns None if no valid utterance was found
+        break    # Good utterance
+
+    # Flush any pending ASR responses in flight
     self.__AsrFlush()
+
     return resp
 
   def __DecodeOutcome(self, items):
 
     # Look at the best entry and quickly check if it's a command
     for s in items:
-      #print "*** Best: ", self.best, "N-Best:", self.nbest
-      p = 1.0
+      p = 1.0  # FIXME: This is a stub for probability
       try:
         #print "Trying:", s
         if (s.startswith('COMMAND ')):
@@ -181,9 +198,6 @@ def NewTrackIndication():
 
 # Create play queue
 pq = PlayQueue(m, NewTrackIndication)
-
-# Create speech synthesizer
-synth = TextToSpeech()
 
 def UnicodeToAscii(u):
   table = { 0x2018:0x27, 0x2019:0x27, 0x201C:0x22, 0x201D:0x22 }
