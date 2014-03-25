@@ -1,0 +1,188 @@
+#!/usr/bin/python -B
+
+"""
+SpotifyServer
+
+HTTP server wrapper around Spotify.
+
+Copyright (c) 2014 All Right Reserved, Liam Wickins
+
+Please see the LICENSE file for more information.
+
+THIS CODE AND INFORMATION ARE PROVIDED "AS IS" WITHOUT WARRANTY OF ANY 
+KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
+PARTICULAR PURPOSE.
+"""
+
+from __future__ import division
+import sys, time, readline, os, threading, codecs
+from optparse import OptionParser
+from MusicDB import MusicDB
+from SpotifyService import SpotifyService
+from MusicOutcome import MusicOutcome
+from SpotifySearch import SpotifySearch
+from PlayQueue import PlayQueue
+from UdpServer import UdpServer
+
+parser = OptionParser()
+parser.add_option("-u", "--user", dest="user",
+                  help="Spotify user name",
+                  action="store", type="string")
+parser.add_option("-p", "--pass", dest="password",
+                  help="Spotify password",
+                  action="store", type="string")
+parser.add_option("-q", "--quiet", dest="announce",
+                  help="Synthesizer announcements are suppressed",
+                  action="store_false", default=True)
+parser.add_option("-d", "--db", dest="musicDatabase",
+                  help="Music database",
+                  action="store", type="string")
+parser.add_option("-r", "--port", dest="port",
+                  help="Server port number",
+                  action="store", default=5005, type="int")
+(options, args) = parser.parse_args()
+
+# Required for E-Speak python module
+if (options.announce):
+
+  sys.path.append("../espeak.py")
+  from TextToSpeech import TextToSpeech
+
+  # Create speech synthesizer
+  synth = TextToSpeech()
+
+if (not options.user or not options.password):
+  print "You must have a Spotify account and token to use this program."
+  exit()
+
+# Create client session and login
+m = SpotifyService()
+if (m.LoginUser(options.user, options.password) != 0):
+  m.Exit()
+  exit("Error: Failed to login to Spotify")
+
+# Create offline music database connection
+if (options.musicDatabase):
+  db = MusicDB(options.musicDatabase)
+else:
+  db = None
+
+trackCount = 0
+lastTrackCount = 0
+def NewTrackIndication():
+  global trackCount
+  trackCount += 1
+
+# Create play queue
+pq = PlayQueue(m, NewTrackIndication)
+
+# UDP server connection
+udpSrv = UdpServer(port=options.port)
+
+def UnicodeToAscii(u):
+  table = { 0x2018:0x27, 0x2019:0x27, 0x201C:0x22, 0x201D:0x22 }
+  return u.translate(table).encode('ascii', 'ignore')
+
+# Helper function to announce/show current track information
+def TrackInfo():
+  info = pq.GetCurrentTrackInfo()
+  if (info):
+    track = info['name']
+    artist = m.GetArtistInfo(info['artists'][0])
+    artist = artist['name']
+    text = UnicodeToAscii("Track : " + track + " : " + artist)
+    print text
+    if (options.announce):
+      synth.SpeakAndWaitUntilFinished(text)
+
+# Main application loop
+while True:
+
+  # Wait for input command
+  s, addr = udpSrv.RecvMessage()
+  msg = None
+
+  # Turn command into music outcome
+  p = 1.0
+  if (s.startswith('COMMAND ')):
+    # Strip off 'COMMAND' prefix since this is merely a 'cue'
+    outcome = MusicOutcome(s.lower()[8:], confidence=p)
+  else:
+    outcome = MusicOutcome(s.lower(), confidence=p)
+
+  # Try to gather outcome information
+  if (outcome):
+    intent = outcome.intent.name
+    entities = outcome.entities
+  else:
+    msg = "Error - could not decode intent"
+    intent = 'Uknown'
+    entities = None
+
+  if intent == 'play' and not entities:
+    pq.Play()
+    TrackInfo()
+    NewTrackIndication()
+    msg = "Ok"
+  elif intent == 'stop':
+    pq.Stop()
+    msg = "Ok"
+  elif intent == 'skip':
+    pq.SkipForward()
+    TrackInfo()
+    NewTrackIndication()
+    msg = "Ok"
+  elif intent == 'back':
+    pq.SkipBack()
+    TrackInfo()
+    NewTrackIndication()
+    msg = "Ok"
+  elif ((intent == 'search') or (intent == 'play' and entities) or
+        (intent == 'find' and entities)):
+    try:
+      q = SpotifySearch(entities, m, musicDb=db, offline=False)
+      results = q.GetQueryResults()
+    except:
+      msg = "Error: Was not able to format query" + sys.exc_info()[0]
+      results = []
+    numTracks = len(results)
+    msg = "Search returned " + str(numTracks) + " tracks\n"
+    if (intent == 'play' and numTracks > 0):
+      msg += "Inserted " + str(numTracks) + " tracks onto playlist"
+      pq.Insert(results)
+      pq.Reset()
+      pq.Play()
+      TrackInfo()
+      NewTrackIndication()
+    elif (numTracks > 0):
+      msg += "Appended " + str(numTracks) + " tracks onto playlist"
+      pq.Append(results)
+  elif intent == 'reset':
+    pq.Reset()
+    msg = "Ok"
+  elif intent == 'pause':
+    pq.Pause()
+    msg = "Ok"
+  elif intent == 'resume':
+    pq.Resume()
+    msg = "Ok"
+  elif intent == 'clear':
+    pq.Clear()
+    msg = "Ok"
+  elif intent == 'info':
+    TrackInfo()
+    msg = "Play queue at " + str(pq.QueueIndex()) + "with " + str(pq.QueueSize()) + " tracks."
+  elif intent == 'stats':
+    stats = m.GetStatistics()
+    msg = "Occupancy: " + str(stats[2]) + "%" + " Dropped: " + str(stats[1])
+
+  if (msg is not None):
+    udpSrv.SendMessage(msg, addr)
+
+# Logout and delete session
+m.LogoutUser()
+m.Exit()
+
+# Close socket
+udpSrv.Close()

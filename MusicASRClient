@@ -1,0 +1,183 @@
+#!/usr/bin/python -B
+
+"""
+MusicASRClient
+
+Voice controlled ASR music client.
+
+Copyright (c) 2014 All Right Reserved, Liam Wickins
+
+Please see the LICENSE file for more information.
+
+THIS CODE AND INFORMATION ARE PROVIDED "AS IS" WITHOUT WARRANTY OF ANY 
+KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
+PARTICULAR PURPOSE.
+"""
+
+from __future__ import division
+import sys, time, readline, os, threading, codecs
+from optparse import OptionParser
+
+parser = OptionParser()
+parser.add_option("-a", "--asr", dest="asrDatabase",
+                  help="ASR database for referencing music corpus",
+                  action="store", type="string")
+parser.add_option("-m", "--model", dest="model",
+                  help="ASR model from database to use",
+                  action="store", type="string")
+parser.add_option("-f", "--fsg", dest="fsg",
+                  help="ASR finite state grammar to use",
+                  action="store", type="string")
+parser.add_option("-s", "--server", dest="addr",
+                  help="Spotify server address",
+                  action="store", default="127.0.0.1", type="string")
+parser.add_option("-r", "--port", dest="port",
+                  help="Spotify server port",
+                  action="store", default=5005, type="int")
+(options, args) = parser.parse_args()
+
+# Required for ASR utilities
+sys.path.append("../ASRUtils")
+
+from ASRModel import ASRModel
+from ASR import ASR
+from ASRGoogleAPI import ASRGoogleAPI
+from UdpClient import UdpClient
+from MusicOutcome import MusicOutcome
+
+if (not options.asrDatabase or not options.model):
+  print "You have not given a local ASR model - only remote will be used"
+
+if (options.fsg):
+  print "You are using a finite state grammar:", options.fsg
+
+class MusicASR():
+
+  def __init__(self, database, model, fsg):
+
+    self.asrList = []
+    self.asrQueue = []
+    self.event = threading.Event()
+
+    # ASR database and language model are optional for command and control
+    # Enabling this makes local look-ups happen faster and improves the
+    # end-user experience
+    if (database and model):
+      self.asrModel = ASRModel(database, model)
+      self.asrList.append((ASR(self.__AsrCallback,
+                               hmm=self.__GetHmm(),
+                               lm=self.__GetLm(),
+                               dic=self.__GetDict(),
+                               fsg=fsg,
+                               wordLimit=2, # Restrict commands to two words
+                               tag='cmu'), 'cmu'))
+
+    # Remote Google instance should always be enabled, it has a much
+    # higher latency than the local ASR but is able to cope with very
+    # much more complex utterances more reliably
+
+    self.asrList.append((ASRGoogleAPI(self.__AsrCallback, tag='google', timeout=1), 'google'))
+
+  def __AsrPlay(self):
+    for asr,tag in self.asrList:
+      asr.Play()
+
+  def __AsrPause(self):
+    for asr,tag in self.asrList:
+      asr.Pause()
+
+  def __AsrFlush(self):
+    for asr,tag in self.asrList:
+      asr.Flush()
+
+  def __AsrExit(self):
+    for asr,tag in self.asrList:
+      asr.Exit()
+
+  def __AsrCallback(self, event, tag, best):
+    if (event == 'result'):
+      self.asrQueue += best
+      self.event.set()   # Wake up pending speech timeout
+
+  def WaitSpeechOutcome(self, timeout=None):
+
+    # Clear queues and enable the ASR engines
+    resp = (None, None)
+    self.asrQueue = []
+    self.event.clear()
+    self.__AsrPlay()
+
+    # Wait for ASR message or timeout
+    while (self.event.wait(timeout)):
+      self.event.clear()
+      # ASR queue will contain all viable utterances so far, decode them...
+      resp = self.__DecodeOutcome(self.asrQueue)
+      if (resp is not (None,None)): # Returns None if no valid utterance was found
+        break    # Good utterance
+
+    # Flush any pending ASR responses in flight
+    self.__AsrFlush()
+
+    return resp
+
+  def __DecodeOutcome(self, items):
+
+    # Look at the best entry and quickly check if it's a command
+    for s in items:
+      p = 1.0  # FIXME: This is a stub for probability
+      try:
+        #print "Trying:", s
+        if (s.startswith('COMMAND ')):
+          # Strip off 'COMMAND' prefix since this is merely a 'cue'
+          outcome = MusicOutcome(s.lower()[8:], confidence=p)
+        else:
+          outcome = MusicOutcome(s.lower(), confidence=p)
+        #print "Outcome:", outcome
+        if (outcome is not None):
+          return (s, outcome)
+      except:
+        pass
+
+    return (None, None)
+
+  def Exit(self):
+    self.__AsrExit()
+
+  def __GetHmm(self):
+    return self.asrModel.model
+
+  def __GetLm(self):
+    return self.asrModel.lm
+
+  def __GetDict(self):
+    return self.asrModel.dict
+
+# Create client connection to server
+udpCli = UdpClient(dest=options.addr, port=options.port)
+
+# Initialize our music ASR
+asr = MusicASR(options.asrDatabase, options.model, options.fsg)
+
+# Main application loop
+while True:
+
+  # Wait for ASR command outcome (s=sentence uttered, outcome=parsed outcome)
+  (s, outcome) = asr.WaitSpeechOutcome()
+
+  # Try to gather outcome information (None means intent could not be found)
+  if (outcome):
+    intent = outcome.intent.name
+  else:
+    intent = None
+
+  if intent == 'exit' or intent == 'quit':
+    break
+  elif (intent is not None):
+    udpCli.SendMessage(s)
+    print "CLI -> SERV:", s
+    (resp, addr) = udpCli.RecvMessage()
+    print "CLI <- SERV:", resp
+
+# Logout and delete session
+asr.Exit()
