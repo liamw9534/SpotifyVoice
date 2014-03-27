@@ -19,7 +19,7 @@ class PlayQueue():
 
   def __init__(self, session, callback=None):
     self.queue = []
-    self.index = 0
+    self.index = None
     self.session = session
     self.session.NotifyCallback(self.__Callback)
     self.userCallback = callback
@@ -31,6 +31,8 @@ class PlayQueue():
 
   def Insert(self, results):
     self.queue = results + self.queue
+    if (self.index is not None):
+      self.index += len(results)
 
   def Append(self, results):
     self.queue += results
@@ -41,18 +43,23 @@ class PlayQueue():
   def QueueSize(self):
     return len(self.queue)
 
-  def GetCurrentTrackInfo(self):
-    if (self.index < len(self.queue)):
-      t = spotify.Track(self.queue[self.index]).load()
-      return self.session.GetTrackInfo(t)
+  def GetCurrentTrack(self):
+    if (self.index is not None and self.index < len(self.queue)):
+      return self.queue[self.index]
+
+  def GetAllTracks(self):
+    return self.queue
 
   def Clear(self):
-    self.Stop()
     self.queue = []
+    self.Reset()
 
   def Reset(self):
     self.Stop()
-    self.index = 0
+    if (len(self.queue) > 0):
+      self.index = 0
+    else:
+      self.index = None
 
   def Stop(self):
     self.session.Stop()
@@ -63,23 +70,27 @@ class PlayQueue():
   def Resume(self):
     self.session.Resume()
 
-  def SkipBack(self):
-    self.index -= 1
-    if (self.index < 0):
-      if (len(self.queue) > 0):
-        self.index = len(self.queue)-1
-      self.index = 0
-    self.Play()
+  def SkipBack(self, number=1):
+    if (self.index is not None):
+      self.index -= number
+      if (self.index < 0):
+        if (len(self.queue) > 0):
+          self.index = len(self.queue)-1
+        self.index = 0
+      self.Play()
 
-  def SkipForward(self):
-    self.index += 1
-    if (self.index >= len(self.queue)):
-      self.index = 0
-    self.Play()
+  def SkipForward(self, number=1):
+    if (self.index is not None):
+      self.index += number
+      if (self.index >= len(self.queue)):
+        self.index = 0
+      self.Play()
 
   def Play(self):
     self.Stop()
-    if (self.index < len(self.queue) and len(self.queue) > 0):
+    if (self.index is None and len(self.queue) > 0):
+      self.index = 0
+    if (self.index is not None and self.index < len(self.queue) and len(self.queue) > 0):
       t = spotify.Track(self.queue[self.index]).load()
       self.session.PlayTrack(t)
 

@@ -30,6 +30,7 @@ class SpotifyService():
   """
 
   def __init__(self,
+               device=None,
                agentName="Python SpotifyClient",
                logFile=b'/tmp/libspotify-trace.log'):
     """Create spotify session and configure it"""
@@ -41,6 +42,7 @@ class SpotifyService():
     self.threadingEvent = {}
     self.audioFormat = {}
     self.notifyCallback = None
+    self.device = device
  
     # Create audio buffer
     self.audioBuffer = AudioBuffer()
@@ -270,7 +272,8 @@ class SpotifyService():
     self.stream = AudioStream(self.audioBuffer,
                               self.audioFormat['width'],
                               self.audioFormat['channels'],
-                              self.audioFormat['rate'])
+                              self.audioFormat['rate'],
+                              self.device)
     self.stream.Start()
 
   def __StopAudioStream(self):
@@ -296,6 +299,26 @@ class SpotifyService():
     if (self.stream):
       self.stream.Resume()
 
+  def Mute(self):
+    if (self.stream):
+      self.stream.Mute()
+
+  def Unmute(self):
+    if (self.stream):
+      self.stream.Unmute()
+
+  def SetVolume(self, level):
+    if (self.stream):
+      self.stream.SetVolume(level)
+
+  def IncrVolume(self, step):
+    if (self.stream):
+      self.stream.IncrVolume(step)
+
+  def DecrVolume(self, step):
+    if (self.stream):
+      self.stream.DecrVolume(step)
+
   def __BytesToSamples(self, nBytes):
       """Helper function to convert nBytes to nSamples"""
       divisor = (self.audioFormat['width'] * self.audioFormat['channels'])
@@ -309,9 +332,11 @@ class SpotifyService():
     # The audio buffer only tracks bytes and we can only convert to samples
     # once we have an audio stream established with known properties
     if (self.stream):
+      totalSamples = self.__BytesToSamples(self.audioBuffer.GetBufTotal())
       numSamples = self.__BytesToSamples(self.audioBuffer.GetBufOccupancy())
       numDropped = self.__BytesToSamples(self.audioBuffer.GetBufDropped())
       divisor = self.__BytesToSamples(self.audioBuffer.GetBufSize())
+      rate = self.audioFormat['rate']
       if (divisor > 0):
         percent = (numSamples * 100.0) / divisor
       else:
@@ -320,8 +345,10 @@ class SpotifyService():
       percent = 0
       numSamples = 0
       numDropped = 0
+      totalSamples = 0
+      rate = 0
 
-    return (numSamples, numDropped, percent)
+    return (numSamples, numDropped, percent, totalSamples, rate)
 
   def __GetAudioFormat(self, audioFormat):
     """Helper function to convert audio format to a dict"""

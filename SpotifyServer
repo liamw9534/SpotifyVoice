@@ -23,7 +23,9 @@ from SpotifyService import SpotifyService
 from MusicOutcome import MusicOutcome
 from SpotifySearch import SpotifySearch
 from PlayQueue import PlayQueue
-from UdpServer import UdpServer
+from MusicMessage import *
+import json, spotify
+import BaseHTTPServer
 
 parser = OptionParser()
 parser.add_option("-u", "--user", dest="user",
@@ -40,7 +42,13 @@ parser.add_option("-d", "--db", dest="musicDatabase",
                   action="store", type="string")
 parser.add_option("-r", "--port", dest="port",
                   help="Server port number",
-                  action="store", default=5005, type="int")
+                  action="store", default=8000, type="int")
+parser.add_option("-s", "--addr", dest="addr",
+                  help="Server IP address",
+                  action="store", default="127.0.0.1", type="string")
+parser.add_option("-e", "--dev", dest="dev",
+                  help="Audio device name e.g., Master, PCM, etc",
+                  action="store", default="Master", type="string")
 (options, args) = parser.parse_args()
 
 # Required for E-Speak python module
@@ -57,7 +65,7 @@ if (not options.user or not options.password):
   exit()
 
 # Create client session and login
-m = SpotifyService()
+m = SpotifyService(device=options.dev)
 if (m.LoginUser(options.user, options.password) != 0):
   m.Exit()
   exit("Error: Failed to login to Spotify")
@@ -77,112 +85,157 @@ def NewTrackIndication():
 # Create play queue
 pq = PlayQueue(m, NewTrackIndication)
 
-# UDP server connection
-udpSrv = UdpServer(port=options.port)
-
 def UnicodeToAscii(u):
   table = { 0x2018:0x27, 0x2019:0x27, 0x201C:0x22, 0x201D:0x22 }
   return u.translate(table).encode('ascii', 'ignore')
 
+# Helper function to expand all elements starting from track URI
+def ExpandTrackInfo(session, uri):
+  if (uri is None):
+    return None
+  track = session.GetTrackInfo(spotify.Track(uri).load())
+  track['artists'] = [session.GetArtistInfo(a)['name'] for a in track['artists']]
+  track['album'] =  session.GetAlbumInfo(track['album'])['name']
+  track['link'] = track['link'].uri
+  track.pop('playable',None)
+  return track
+
 # Helper function to announce/show current track information
 def TrackInfo():
-  info = pq.GetCurrentTrackInfo()
-  if (info):
-    track = info['name']
-    artist = m.GetArtistInfo(info['artists'][0])
-    artist = artist['name']
-    text = UnicodeToAscii("Track : " + track + " : " + artist)
+  t = pq.GetCurrentTrack()
+  if (t):
+    track = ExpandTrackInfo(m, t)
+    text = UnicodeToAscii("Track : " + track['name'] + "; Album : " + track['album'] + "; Artist : " + track['artists'][0])
     print text
     if (options.announce):
       synth.SpeakAndWaitUntilFinished(text)
 
-# Main application loop
-while True:
+def ProcessOutcome(outcome):
 
-  # Wait for input command
-  s, addr = udpSrv.RecvMessage()
-  msg = None
+  msg = MusicMessage()
 
-  # Turn command into music outcome
-  p = 1.0
-  if (s.startswith('COMMAND ')):
-    # Strip off 'COMMAND' prefix since this is merely a 'cue'
-    outcome = MusicOutcome(s.lower()[8:], confidence=p)
-  else:
-    outcome = MusicOutcome(s.lower(), confidence=p)
-
-  # Try to gather outcome information
+  # Try to gather outcome information from the command
   if (outcome):
     intent = outcome.intent.name
     entities = outcome.entities
   else:
-    msg = "Error - could not decode intent"
+    msg.AddStatus(MusicStatus.STATUS_INTENT_NOT_SUPPORTED)
     intent = 'Uknown'
     entities = None
-
   if intent == 'play' and not entities:
     pq.Play()
     TrackInfo()
     NewTrackIndication()
-    msg = "Ok"
+    msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'stop':
     pq.Stop()
-    msg = "Ok"
+    msg.AddStatus(MusicStatus.STATUS_OK)
+  elif intent == 'shuffle':
+    msg.AddStatus(MusicStatus.STATUS_NOT_YET_IMPLEMENTED)
   elif intent == 'skip':
-    pq.SkipForward()
+    number = int(outcome.GetEntity('number', 1))
+    pq.SkipForward(number)
     TrackInfo()
     NewTrackIndication()
-    msg = "Ok"
+    msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'back':
-    pq.SkipBack()
+    number = int(outcome.GetEntity('number', 1))
+    pq.SkipBack(number)
     TrackInfo()
     NewTrackIndication()
-    msg = "Ok"
-  elif ((intent == 'search') or (intent == 'play' and entities) or
-        (intent == 'find' and entities)):
+    msg.AddStatus(MusicStatus.STATUS_OK)
+  elif ((intent == 'search' or intent == 'play' or intent == 'find' or intent == 'insert' or
+         intent == 'append') and entities):
     try:
       q = SpotifySearch(entities, m, musicDb=db, offline=False)
       results = q.GetQueryResults()
     except:
-      msg = "Error: Was not able to format query" + sys.exc_info()[0]
+      msg.AddStatus(MusicStatus.STATUS_BAD_SEARCH_QUERY_EXCEPTION)
       results = []
     numTracks = len(results)
-    msg = "Search returned " + str(numTracks) + " tracks\n"
+    msg.AddStatus(MusicStatus.STATUS_OK)
+    msg += {'numTracks': numTracks}
     if (intent == 'play' and numTracks > 0):
-      msg += "Inserted " + str(numTracks) + " tracks onto playlist"
       pq.Insert(results)
       pq.Reset()
       pq.Play()
       TrackInfo()
       NewTrackIndication()
+    elif (numTracks > 0 and intent == 'insert'):
+      pq.Insert(results)
     elif (numTracks > 0):
-      msg += "Appended " + str(numTracks) + " tracks onto playlist"
       pq.Append(results)
   elif intent == 'reset':
     pq.Reset()
-    msg = "Ok"
+    msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'pause':
     pq.Pause()
-    msg = "Ok"
+    msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'resume':
     pq.Resume()
-    msg = "Ok"
+    msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'clear':
     pq.Clear()
-    msg = "Ok"
+    msg.AddStatus(MusicStatus.STATUS_OK)
+  elif intent == 'mute':
+    m.Mute()
+    msg.AddStatus(MusicStatus.STATUS_OK)
+  elif intent == 'unmute':
+    m.Unmute()
+    msg.AddStatus(MusicStatus.STATUS_OK)
+  elif intent == 'volume':
+    volume = outcome.GetEntity('volume')
+    if (volume):
+      m.SetVolume(int(volume))
+    msg.AddStatus(MusicStatus.STATUS_OK)
+  elif intent == 'louder':
+    m.IncrVolume(10)
+    msg.AddStatus(MusicStatus.STATUS_OK)
+  elif intent == 'quieter':
+    m.DecrVolume(10)
+    msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'info':
-    TrackInfo()
-    msg = "Play queue at " + str(pq.QueueIndex()) + "with " + str(pq.QueueSize()) + " tracks."
+    obj = outcome.GetEntity('object')
+    if (obj):
+      status = MusicStatus.STATUS_OK
+      if (obj == 'playlist'):
+        msg += {'playlist':[ExpandTrackInfo(m, i) for i in pq.GetAllTracks()]}
+      elif (obj == 'track'):
+        msg += {'track':ExpandTrackInfo(m, pq.GetCurrentTrack()),'playlistPosition':pq.index}
+      else:
+        status = MusicStatus.STATUS_UNKNOWN_INFO_OBJECT_REQUESTED
+      msg.AddStatus(status)
+    else:
+      msg.AddStatus(MusicStatus.STATUS_OK)
+      msg += {'playlist':[ExpandTrackInfo(m, i) for i in pq.GetAllTracks()]}
+      msg += {'track':ExpandTrackInfo(m, pq.GetCurrentTrack())}
   elif intent == 'stats':
     stats = m.GetStatistics()
-    msg = "Occupancy: " + str(stats[2]) + "%" + " Dropped: " + str(stats[1])
+    msg.AddStatus(MusicStatus.STATUS_OK)
+    msg += {'occupancy':stats[0], 'drops':stats[1], 'percent':stats[2], 'total':stats[3], 'rate':stats[4]}
 
-  if (msg is not None):
-    udpSrv.SendMessage(msg, addr)
+  return msg
+
+# Start HTTP server
+class MusicHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+
+  def do_POST(self):
+    self.send_response(200)
+    self.end_headers()
+    data = self.rfile.read(int(self.headers.get('content-length', 0)))
+    try:
+      command = json.loads(data)
+      outcome = MusicOutcome(command['command'].lower())
+    except:
+      outcome = None
+    resp = ProcessOutcome(outcome)
+    self.wfile.write(resp)
+
+print "HTTPD running..."
+addr = ('', options.port)
+httpd = BaseHTTPServer.HTTPServer(addr, MusicHTTPHandler)
+httpd.serve_forever()
 
 # Logout and delete session
 m.LogoutUser()
 m.Exit()
-
-# Close socket
-udpSrv.Close()

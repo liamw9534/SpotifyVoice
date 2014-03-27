@@ -18,6 +18,8 @@ PARTICULAR PURPOSE.
 from __future__ import division
 import sys, time, readline, os, threading, codecs
 from optparse import OptionParser
+from MusicMessage import *
+import requests
 
 parser = OptionParser()
 parser.add_option("-a", "--asr", dest="asrDatabase",
@@ -34,7 +36,7 @@ parser.add_option("-s", "--server", dest="addr",
                   action="store", default="127.0.0.1", type="string")
 parser.add_option("-r", "--port", dest="port",
                   help="Spotify server port",
-                  action="store", default=5005, type="int")
+                  action="store", default=8000, type="int")
 (options, args) = parser.parse_args()
 
 # Required for ASR utilities
@@ -43,7 +45,6 @@ sys.path.append("../ASRUtils")
 from ASRModel import ASRModel
 from ASR import ASR
 from ASRGoogleAPI import ASRGoogleAPI
-from UdpClient import UdpClient
 from MusicOutcome import MusicOutcome
 
 if (not options.asrDatabase or not options.model):
@@ -70,7 +71,7 @@ class MusicASR():
                                lm=self.__GetLm(),
                                dic=self.__GetDict(),
                                fsg=fsg,
-                               wordLimit=2, # Restrict commands to two words
+                               wordLimit=2, # Restrict commands to one word only
                                tag='cmu'), 'cmu'))
 
     # Remote Google instance should always be enabled, it has a much
@@ -97,6 +98,7 @@ class MusicASR():
 
   def __AsrCallback(self, event, tag, best):
     if (event == 'result'):
+      print "ASR:", tag, "detected:", best
       self.asrQueue += best
       self.event.set()   # Wake up pending speech timeout
 
@@ -106,6 +108,8 @@ class MusicASR():
     resp = (None, None)
     self.asrQueue = []
     self.event.clear()
+
+    # Start ASR processing
     self.__AsrPlay()
 
     # Wait for ASR message or timeout
@@ -113,10 +117,13 @@ class MusicASR():
       self.event.clear()
       # ASR queue will contain all viable utterances so far, decode them...
       resp = self.__DecodeOutcome(self.asrQueue)
-      if (resp is not (None,None)): # Returns None if no valid utterance was found
+      if (resp != (None,None)): # Returns None if no valid utterance was found
+        #print "Breaking on", resp
         break    # Good utterance
+      else:
+        print "What?"
 
-    # Flush any pending ASR responses in flight
+    # Flush ASR processes
     self.__AsrFlush()
 
     return resp
@@ -125,15 +132,13 @@ class MusicASR():
 
     # Look at the best entry and quickly check if it's a command
     for s in items:
-      p = 1.0  # FIXME: This is a stub for probability
       try:
         #print "Trying:", s
         if (s.startswith('COMMAND ')):
           # Strip off 'COMMAND' prefix since this is merely a 'cue'
-          outcome = MusicOutcome(s.lower()[8:], confidence=p)
+          outcome = MusicOutcome(s.lower()[8:])
         else:
-          outcome = MusicOutcome(s.lower(), confidence=p)
-        #print "Outcome:", outcome
+          outcome = MusicOutcome(s.lower())
         if (outcome is not None):
           return (s, outcome)
       except:
@@ -153,11 +158,16 @@ class MusicASR():
   def __GetDict(self):
     return self.asrModel.dict
 
-# Create client connection to server
-udpCli = UdpClient(dest=options.addr, port=options.port)
-
 # Initialize our music ASR
 asr = MusicASR(options.asrDatabase, options.model, options.fsg)
+
+def HTTPTransaction(msg):
+  url = 'http://'+options.addr+':'+str(options.port)
+  data = json.dumps(msg)
+  headers = {'content-type':'application/json',
+             'content-length': len(data)}
+  r = requests.post(url, data=data, headers=headers)
+  return r.text
 
 # Main application loop
 while True:
@@ -169,15 +179,18 @@ while True:
   if (outcome):
     intent = outcome.intent.name
   else:
+    print "What?"
     intent = None
-
   if intent == 'exit' or intent == 'quit':
+    print "EXITING..."
     break
   elif (intent is not None):
-    udpCli.SendMessage(s)
     print "CLI -> SERV:", s
-    (resp, addr) = udpCli.RecvMessage()
-    print "CLI <- SERV:", resp
+    try:
+      resp = HTTPTransaction({'command':s})
+      print "CLI <- SERV:", resp
+    except:
+      print "* Could not send request to server"
 
 # Logout and delete session
 asr.Exit()

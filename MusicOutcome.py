@@ -35,10 +35,15 @@ class MusicOutcome(WitAiOutcome):
        else, or the grammar is not good enough."""
 
     # Extend this list to support more music outcome application commands
-    cmd = "(back|skip|stop|pause|resume|play|insert|append|reset|clear|preview|quit|exit|stats|info)"
+    volume = "(volume)"
+    info = "(info)"
+    navi = "(skip|back)"
+    obj = " (track|playlist)"
+    cmd = "(back|skip|stop|pause|resume|play|reset|clear|preview|quit|exit|stats|info|mute|unmute|louder|quieter|shuffle)"
     x = " (.+)"
+    num = " (\d+)"
     xna = "(.+!artist!track!album)"
-    search = "(find|search|play)"  # Special command for building music queries
+    search = "(insert|append|find|search|play)"  # Special command for building music queries
     year = " (year)" 
     to = " (to)"
     by = " (by)"
@@ -78,6 +83,10 @@ class MusicOutcome(WitAiOutcome):
       ("^"+search+x+genre+x+"$", 'V_x_N_x', ['query'] ),
       ("^"+search+x+frm+x+"$", 'V_x_IN_x', ['track', 'album']),
       ("^"+search+x+"$", 'V_x', ['query']),
+      ("^set "+volume+num+"$", 'V_x', ['volume']),
+      ("^"+volume+num+"$", 'V_x', ['volume']),
+      ("^"+info+obj+"$", 'V_x', ['object']),
+      ("^"+navi+num+"$", 'V_x', ['number']),
       ("^"+cmd+"$", 'V', [])
     ]
 
@@ -103,4 +112,10 @@ class MusicOutcome(WitAiOutcome):
 
       # The grammar doesn't support the query that the user made
       raise MusicOutcomeUnableToExtractIntent
+
+  def MakeDict(self):
+    return { 'entities': [e.__dict__ for e in self.entities], 'intent': self.intent.name, 'confidence':self.confidence }
+
+  def __str__(self):
+    return str(self.MakeDict())
 

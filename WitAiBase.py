@@ -42,5 +42,12 @@ class WitAiOutcome:
     self.intent = WitAiIntent(intent)
     self.confidence = confidence
 
+  def GetEntity(self, name, valueIfNotFound=None):
+    entities = [e for e in self.entities if e.name == name]
+    if (len(entities) >= 1):
+      return entities[0].value
+    else:
+      return valueIfNotFound
+
   def __repr__(self):
     return repr(self.__dict__)

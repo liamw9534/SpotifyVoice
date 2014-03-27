@@ -13,7 +13,7 @@ IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 PARTICULAR PURPOSE.
 """
 
-import socket
+import socket, os
 
 class UdpClient():
 
@@ -26,7 +26,10 @@ class UdpClient():
   def SendMessage(self, msg):
     self.sock.sendto(msg, (self.dest, self.port))
 
-  def RecvMessage(self, maxLen=2048):
+  def RecvMessage(self, maxLen=2048, timeout=None):
+    old = self.sock.gettimeout()
+    self.sock.settimeout(timeout)
     data, addr = self.sock.recvfrom(maxLen)
+    self.sock.settimeout(old)
     return data, addr
 

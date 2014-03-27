@@ -33,6 +33,11 @@ class AudioBuffer():
     self.buf = ''
     self.dropped = 0
     self.size = size
+    self.total = 0
+
+  def GetBufTotal(self):
+    """Total number of bytes written since last flush"""
+    return self.total
 
   def GetBufDropped(self):
     """Number of dropped bytes from write attempts to the buffer"""
@@ -55,6 +60,7 @@ class AudioBuffer():
     put = min(wanted, available)
     self.buf += data[:put]
     self.dropped += (wanted - put)
+    self.total += put
     return put
 
   def Read(self, wanted):
@@ -71,4 +77,5 @@ class AudioBuffer():
 
   def Flush(self):
     """Flushes (empties) the buffer"""
+    self.total = 0
     self.buf = ''
