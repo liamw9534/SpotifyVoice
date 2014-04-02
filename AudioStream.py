@@ -27,6 +27,7 @@ class AudioStream():
                               channels=channels,
                               output=True,
                               rate=rate,
+                              frames_per_buffer=8192,
                               stream_callback=self.__RequestSamplesCallback)
     self.rate = rate
     self.channels = channels
@@ -34,8 +35,8 @@ class AudioStream():
     self.buffer = buf
     self.streamPaused = False
 
-    # Create threading event for paAbort event delivery
-    self.abortEvent = threading.Event()
+    # Create threading event for paComplete event delivery
+    self.completeEvent = threading.Event()
 
     # Track number of audio hardware underruns
     self.underruns = 0
@@ -55,18 +56,24 @@ class AudioStream():
     else:
       opData = self.buffer.Read(wanted)
 
-    # Track any underrun events
-    if (statusFlags == pyaudio.paOutputUnderflow):
-      self.underruns += 1
+    # Record actual length
+    actual = len(opData)
 
-    # The default flag is paContinue or paAbort.
-    # paContinue is the starting condition whereas paAbort is when we're
+    # Track any underrun events
+    if (statusFlags == pyaudio.paOutputUnderflow or actual < wanted):
+      self.underruns += 1
+      opData += self.__GenerateSilence(wanted-actual) # Substitute silence
+
+    # The default flag is paContinue or paComplete.
+    # paContinue is the starting condition whereas paComplete is when we're
     # stopping the stream.
     opFlag = self.defaultFlag
 
-    # If paAbort is being delivered, then we notify an event
-    if (opFlag == pyaudio.paAbort):
-      self.abortEvent.set()
+    # If paComplete is being delivered, then we notify an event
+    if (opFlag == pyaudio.paComplete):
+      self.completeEvent.set()
+
+    #print "Wanted:", wanted, "Actual:", actual, "Flag:", opFlag, "Drops:", self.underruns
 
     return (opData, opFlag)
 
@@ -79,6 +86,9 @@ class AudioStream():
   def __GenerateSilence(self, wanted):
     return chr(0) * wanted
 
+  def IsPlaying(self):
+    return not self.streamPaused
+
   def Pause(self):
     """Pause audio stream"""
     self.streamPaused = True
@@ -90,17 +100,20 @@ class AudioStream():
   def Stop(self, wait=True, timeout=1):
     """Stop the audio stream playing"""
     self.Pause()                             # Do not output normal frames
-    self.defaultFlag = pyaudio.paAbort       # Used by callback handler
-    # The caller is optionally allowed to wait for the paAbort event being
+    self.defaultFlag = pyaudio.paComplete       # Used by callback handler
+    # The caller is optionally allowed to wait for the paComplete event being
     # delivered to PyAudio which means it is safe to stop the stream
     if (wait):
-      if (self.abortEvent.wait(timeout)):
-        self.abortEvent.clear()
+      if (self.completeEvent.wait(timeout)):
+        self.completeEvent.clear()
         self.stream.stop_stream()
 
   def GetNumUnderruns(self):
     """Returns the number of underrun events that have happened"""
     return self.underruns
+
+  def GetVolume(self):
+    return self.volume
 
   def __GetVolume(self):
     vol = int(self.mixer.getvolume()[0])
@@ -117,21 +130,9 @@ class AudioStream():
 
   def SetVolume(self, val):
     """Set volume level to value in range 0%-100%"""
+    if (val > 100): val = 100
+    if (val < 0): val = 0
     self.mixer.setvolume(val)
-    self.volume = self.__GetVolume()
-
-  def IncrVolume(self, step):
-    """Increase volume level by a step value %"""
-    vol = self.volume + step
-    if (vol > 100): vol = 100
-    self.mixer.setvolume(vol)
-    self.volume = self.__GetVolume()
-
-  def DecrVolume(self, step):
-    """Decrease volume level by a step value %"""
-    vol = self.volume - step
-    if (vol < 0): vol = 0
-    self.mixer.setvolume(vol)
     self.volume = self.__GetVolume()
 
   def Exit(self):
