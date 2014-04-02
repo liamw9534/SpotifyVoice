@@ -25,7 +25,7 @@ from SpotifySearch import SpotifySearch
 from PlayQueue import PlayQueue
 from MusicMessage import *
 import json, spotify
-import BaseHTTPServer
+import BaseHTTPServer, SimpleHTTPServer
 
 parser = OptionParser()
 parser.add_option("-u", "--user", dest="user",
@@ -49,6 +49,9 @@ parser.add_option("-s", "--addr", dest="addr",
 parser.add_option("-e", "--dev", dest="dev",
                   help="Audio device name e.g., Master, PCM, etc",
                   action="store", default="Master", type="string")
+parser.add_option("-o", "--root", dest="root",
+                  help="HTTP server root directory",
+                  action="store", default="html", type="string")
 (options, args) = parser.parse_args()
 
 # Required for E-Speak python module
@@ -100,13 +103,27 @@ def ExpandTrackInfo(session, uri):
   track.pop('playable',None)
   return track
 
+def LoadAlbumImg(uri):
+  track = spotify.Track(uri).load()
+  image = track.album.load().cover()
+  if (image):
+    return image.load().data_uri
+  return None
+
+def LoadArtistImg(uri):
+  track = spotify.Track(uri).load()
+  image = track.artists[0].load().portrait()
+  if (image):
+    return image.load().data_uri
+  return None
+
 # Helper function to announce/show current track information
 def TrackInfo():
   t = pq.GetCurrentTrack()
   if (t):
     track = ExpandTrackInfo(m, t)
     text = UnicodeToAscii("Track : " + track['name'] + "; Album : " + track['album'] + "; Artist : " + track['artists'][0])
-    print text
+    #print text
     if (options.announce):
       synth.SpeakAndWaitUntilFinished(text)
 
@@ -131,7 +148,13 @@ def ProcessOutcome(outcome):
     pq.Stop()
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'shuffle':
-    msg.AddStatus(MusicStatus.STATUS_NOT_YET_IMPLEMENTED)
+    state = outcome.GetEntity('state', None)
+    if (state):
+      pq.Shuffle(state)
+    else:
+      state = pq.GetShuffleState()
+    msg.AddStatus(MusicStatus.STATUS_OK)
+    msg += {'shuffle': state}
   elif intent == 'skip':
     number = int(outcome.GetEntity('number', 1))
     pq.SkipForward(number)
@@ -157,7 +180,7 @@ def ProcessOutcome(outcome):
     msg += {'numTracks': numTracks}
     if (intent == 'play' and numTracks > 0):
       pq.Insert(results)
-      pq.Reset()
+      pq.ResetPos()
       pq.Play()
       TrackInfo()
       NewTrackIndication()
@@ -166,7 +189,8 @@ def ProcessOutcome(outcome):
     elif (numTracks > 0):
       pq.Append(results)
   elif intent == 'reset':
-    pq.Reset()
+    pos = int(outcome.GetEntity('position', 0))
+    pq.ResetPos(pos)
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'pause':
     pq.Pause()
@@ -187,13 +211,22 @@ def ProcessOutcome(outcome):
     volume = outcome.GetEntity('volume')
     if (volume):
       m.SetVolume(int(volume))
+    curVol = m.GetVolume()
     msg.AddStatus(MusicStatus.STATUS_OK)
+    msg += {'volume':curVol}
   elif intent == 'louder':
     m.IncrVolume(10)
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'quieter':
     m.DecrVolume(10)
     msg.AddStatus(MusicStatus.STATUS_OK)
+  elif intent == 'image':
+    uri = outcome.GetEntity('uri')
+    if (uri):
+      album = LoadAlbumImg(uri)
+      artist = LoadArtistImg(uri)
+      msg.AddStatus(MusicStatus.STATUS_OK)
+      msg += {'albumImage':album, 'artistImage':artist}
   elif intent == 'info':
     obj = outcome.GetEntity('object')
     if (obj):
@@ -201,7 +234,9 @@ def ProcessOutcome(outcome):
       if (obj == 'playlist'):
         msg += {'playlist':[ExpandTrackInfo(m, i) for i in pq.GetAllTracks()]}
       elif (obj == 'track'):
-        msg += {'track':ExpandTrackInfo(m, pq.GetCurrentTrack()),'playlistPosition':pq.index}
+        msg += {'track':ExpandTrackInfo(m, pq.GetCurrentTrack()),'playlistPosition':pq.QueueIndex(), 'state':m.GetPlayState()}
+      elif (obj == 'playlisthash'):
+        msg += {'playlisthash':pq.GetPlaylistHash()}
       else:
         status = MusicStatus.STATUS_UNKNOWN_INFO_OBJECT_REQUESTED
       msg.AddStatus(status)
@@ -212,20 +247,37 @@ def ProcessOutcome(outcome):
   elif intent == 'stats':
     stats = m.GetStatistics()
     msg.AddStatus(MusicStatus.STATUS_OK)
-    msg += {'occupancy':stats[0], 'drops':stats[1], 'percent':stats[2], 'total':stats[3], 'rate':stats[4]}
+    msg += {'stats': {'occupancy':stats[0], 'drops':stats[1], 'percent':stats[2], 'total':stats[3], 'rate':stats[4]}}
 
   return msg
 
-# Start HTTP server
-class MusicHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+# HTTP server
+class MusicHTTPServer(BaseHTTPServer.HTTPServer):
+
+  def __init__(self, addr, requestHandlerClass, documentRoot=None):
+ 
+    # See SocketServer.TCPServer.__init__
+    BaseHTTPServer.HTTPServer.__init__(self, addr, requestHandlerClass)
+    if (documentRoot):
+      os.chdir(documentRoot)
+
+class MusicHTTPHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
+
+  def do_OPTIONS(self):
+    self.send_response(200)
+    self.send_header('Access-Control-Allow-Origin', '*')
+    self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    self.send_header("Access-Control-Allow-Headers", "X-Requested-With, Content-Type, Content-Length") 
 
   def do_POST(self):
     self.send_response(200)
+    self.send_header('Access-Control-Allow-Origin', '*')
+    self.send_header('Content-Type', 'application/json')
     self.end_headers()
     data = self.rfile.read(int(self.headers.get('content-length', 0)))
     try:
       command = json.loads(data)
-      outcome = MusicOutcome(command['command'].lower())
+      outcome = MusicOutcome(command['command'])
     except:
       outcome = None
     resp = ProcessOutcome(outcome)
@@ -233,7 +285,7 @@ class MusicHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
 print "HTTPD running..."
 addr = ('', options.port)
-httpd = BaseHTTPServer.HTTPServer(addr, MusicHTTPHandler)
+httpd = MusicHTTPServer(addr, MusicHTTPHandler, documentRoot=options.root)
 httpd.serve_forever()
 
 # Logout and delete session

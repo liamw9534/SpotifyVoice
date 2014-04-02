@@ -47,6 +47,7 @@ class SpotifyService():
     # Create audio buffer
     self.audioBuffer = AudioBuffer()
     self.stream = None
+    self.volume = 0
 
     # Register for asynchronous callback events
     sessionEvent = 'spotify.SessionEvent.'
@@ -96,7 +97,7 @@ class SpotifyService():
       __SpotifyEventProcessing__(
                 self.session,
                 self.threadingEvent[spotify.SessionEvent.NOTIFY_MAIN_THREAD],
-                0.25)
+                1)
     self.thread.start()
 
   def Exit(self):
@@ -307,17 +308,25 @@ class SpotifyService():
     if (self.stream):
       self.stream.Unmute()
 
-  def SetVolume(self, level):
+  def GetVolume(self):
     if (self.stream):
-      self.stream.SetVolume(level)
+      self.volume = self.stream.GetVolume()
+    return self.volume
+
+  def SetVolume(self, level):
+    self.volume = min(100, level)
+    if (self.stream):
+      self.stream.SetVolume(self.volume)
 
   def IncrVolume(self, step):
+    self.volume = min(100, self.volume+5)
     if (self.stream):
-      self.stream.IncrVolume(step)
+      self.stream.SetVolume(self.volume)
 
   def DecrVolume(self, step):
+    self.volume = max(0, self.volume-5)
     if (self.stream):
-      self.stream.DecrVolume(step)
+      self.stream.SetVolume(self.volume)
 
   def __BytesToSamples(self, nBytes):
       """Helper function to convert nBytes to nSamples"""
@@ -349,6 +358,14 @@ class SpotifyService():
       rate = 0
 
     return (numSamples, numDropped, percent, totalSamples, rate)
+
+  def GetPlayState(self):
+    if (self.stream):
+      if (self.stream.IsPlaying()):
+        return 'playing'
+      else:
+        return 'paused'
+    return 'stopped'
 
   def __GetAudioFormat(self, audioFormat):
     """Helper function to convert audio format to a dict"""

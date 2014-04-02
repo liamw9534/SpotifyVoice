@@ -14,52 +14,74 @@ PARTICULAR PURPOSE.
 """
 
 import spotify
+import hashlib
+import random
 
 class PlayQueue():
 
   def __init__(self, session, callback=None):
     self.queue = []
-    self.index = None
+    self.indexes = []
+    self.index = 0
+    self.shuffleOn = False
     self.session = session
     self.session.NotifyCallback(self.__Callback)
     self.userCallback = callback
 
+  def __FindPos(self, pos):
+    return self.indexes.index(pos)
+
+  def QueueIndex(self):
+    if (self.QueueSize() > 0):
+      return self.indexes[self.index]
+    return None
+
+  def __Shuffle(self, items):
+    if (self.shuffleOn):
+      random.shuffle(items)
+    return items
+ 
   def __Callback(self):
     self.SkipForward()
     if (self.userCallback):
       self.userCallback()
 
   def Insert(self, results):
+    self.indexes = [i+len(results) for i in self.indexes]
+    self.indexes = self.__Shuffle(range(0, len(results))) + self.indexes
     self.queue = results + self.queue
-    if (self.index is not None):
-      self.index += len(results)
+    self.index += (len(results) % self.QueueSize())
 
   def Append(self, results):
+    end = self.QueueSize()
     self.queue += results
-
-  def QueueIndex(self):
-    return self.index
+    self.indexes += self.__Shuffle(range(end, end+self.QueueSize()))
 
   def QueueSize(self):
     return len(self.queue)
 
   def GetCurrentTrack(self):
-    if (self.index is not None and self.index < len(self.queue)):
-      return self.queue[self.index]
+    if (self.index < self.QueueSize()):
+      return self.queue[self.QueueIndex()]
 
   def GetAllTracks(self):
     return self.queue
 
+  def GetPlaylistHash(self):
+    md5 = hashlib.md5()
+    for i in self.queue: md5.update(i)
+    return md5.hexdigest()
+
   def Clear(self):
     self.queue = []
-    self.Reset()
-
-  def Reset(self):
+    self.indexes = []
+    self.index = 0
     self.Stop()
-    if (len(self.queue) > 0):
-      self.index = 0
-    else:
-      self.index = None
+
+  def ResetPos(self, pos=0):
+    if (self.QueueSize() > 0 and pos < self.QueueSize()):
+      self.index = self.__FindPos(pos)
+      self.Play()
 
   def Stop(self):
     self.session.Stop()
@@ -70,28 +92,40 @@ class PlayQueue():
   def Resume(self):
     self.session.Resume()
 
+  def GetShuffleState(self):
+    if (self.shuffleOn):
+      return 'on'
+    return 'off'
+
+  def Shuffle(self, state):
+    if (state == 'on'):
+      self.shuffleOn = True
+    else:
+      self.shuffleOn = False
+      self.index = self.QueueIndex()
+    if (self.QueueSize() > 0):
+      self.indexes = self.__Shuffle(range(0,self.index)) + [self.index] + \
+                     self.__Shuffle(range(self.index+1,self.QueueSize()))
+
   def SkipBack(self, number=1):
-    if (self.index is not None):
-      self.index -= number
-      if (self.index < 0):
-        if (len(self.queue) > 0):
-          self.index = len(self.queue)-1
+    self.index -= number
+    if (self.index < 0):
+      if (self.QueueSize() > 0):
+        self.index = self.QueueSize()-1
+      else:
         self.index = 0
-      self.Play()
+    self.Play()
 
   def SkipForward(self, number=1):
-    if (self.index is not None):
-      self.index += number
-      if (self.index >= len(self.queue)):
-        self.index = 0
-      self.Play()
+    self.index += number
+    if (self.index >= self.QueueSize()):
+      self.index = 0
+    self.Play()
 
   def Play(self):
     self.Stop()
-    if (self.index is None and len(self.queue) > 0):
-      self.index = 0
-    if (self.index is not None and self.index < len(self.queue) and len(self.queue) > 0):
-      t = spotify.Track(self.queue[self.index]).load()
+    if (self.QueueSize() > 0):
+      t = spotify.Track(self.queue[self.QueueIndex()]).load()
       self.session.PlayTrack(t)
 
   def __repr__(self):

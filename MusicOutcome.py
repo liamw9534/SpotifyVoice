@@ -36,12 +36,16 @@ class MusicOutcome(WitAiOutcome):
 
     # Extend this list to support more music outcome application commands
     volume = "(volume)"
+    shuffle = "(shuffle)"
+    reset = "(reset)"
+    image = "(image)"
     info = "(info)"
     navi = "(skip|back)"
-    obj = " (track|playlist)"
-    cmd = "(back|skip|stop|pause|resume|play|reset|clear|preview|quit|exit|stats|info|mute|unmute|louder|quieter|shuffle)"
+    obj = " (track|playlist|playlisthash)"
+    cmd = "(back|skip|stop|pause|resume|play|reset|clear|preview|quit|exit|stats|info|mute|unmute|louder|quieter|volume|shuffle)"
     x = " (.+)"
     num = " (\d+)"
+    onOff = " (on|off)"
     xna = "(.+!artist!track!album)"
     search = "(insert|append|find|search|play)"  # Special command for building music queries
     year = " (year)" 
@@ -83,10 +87,13 @@ class MusicOutcome(WitAiOutcome):
       ("^"+search+x+genre+x+"$", 'V_x_N_x', ['query'] ),
       ("^"+search+x+frm+x+"$", 'V_x_IN_x', ['track', 'album']),
       ("^"+search+x+"$", 'V_x', ['query']),
+      ("^"+image+x+"$", 'V_x', ['uri']),
       ("^set "+volume+num+"$", 'V_x', ['volume']),
       ("^"+volume+num+"$", 'V_x', ['volume']),
       ("^"+info+obj+"$", 'V_x', ['object']),
       ("^"+navi+num+"$", 'V_x', ['number']),
+      ("^"+reset+num+"$", 'V_x', ['position']),
+      ("^"+shuffle+onOff+"$", 'V_x', ['state']),
       ("^"+cmd+"$", 'V', [])
     ]
 
