@@ -24,7 +24,7 @@ class AudioBuffer():
      
   # Dimension the buffer size based on some typical worst case params
   MAX_SAMPLE_RATE = 96000
-  SECONDS = 4
+  SECONDS = 2
   MAX_CHANNELS = 2
   MAX_WIDTH = 2
   AUDIO_BUFFER_SIZE = MAX_SAMPLE_RATE*MAX_CHANNELS*MAX_WIDTH*SECONDS
