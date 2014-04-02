@@ -134,11 +134,8 @@ class MusicASR():
     for s in items:
       try:
         #print "Trying:", s
-        if (s.startswith('COMMAND ')):
-          # Strip off 'COMMAND' prefix since this is merely a 'cue'
-          outcome = MusicOutcome(s.lower()[8:])
-        else:
-          outcome = MusicOutcome(s.lower())
+        s = s.lower()
+        outcome = MusicOutcome(s)
         if (outcome is not None):
           return (s, outcome)
       except:
