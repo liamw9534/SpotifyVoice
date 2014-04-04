@@ -14,12 +14,19 @@ PARTICULAR PURPOSE.
 import threading
 import pyaudio
 import alsaaudio
+from PulseAudio import PulseAudio
 
 class AudioStream():
   """A simple wrapper around PyAudio which uses the callback mechanism
      (i.e., non-blocking) to drive audio data into the sound device.
   """
-  def __init__(self, buf, width, channels, rate, device):
+  def __init__(self, buf, width, channels, rate, sink=0):
+
+    # PulseAudio
+    self.pa = PulseAudio()
+    self.sink = self.pa.GetSink(sink)
+    self.volume = self.__GetVolume()
+    self.pa.SetDefaultSink(self.sink)
 
     # Setup PyAudio and open a stream with the required audio properties
     self.p = pyaudio.PyAudio()
@@ -34,16 +41,13 @@ class AudioStream():
     self.width = width
     self.buffer = buf
     self.streamPaused = False
+    self.defaultFlag = pyaudio.paContinue    # Used by callback handler
 
     # Create threading event for paComplete event delivery
     self.completeEvent = threading.Event()
 
     # Track number of audio hardware underruns
     self.underruns = 0
-
-    # ALSA audio mixer
-    self.mixer = alsaaudio.Mixer(control=device)
-    self.volume = self.__GetVolume()
 
   def __RequestSamplesCallback(self, notUsed, frameCount, timeInfo, statusFlags):
     """Main callback routine invoked by PyAudio which must deliver data
@@ -116,23 +120,22 @@ class AudioStream():
     return self.volume
 
   def __GetVolume(self):
-    vol = int(self.mixer.getvolume()[0])
+    vol = self.pa.GetSinkVolume(self.sink)[0]
     return vol
 
   def Mute(self):
     """Mute volume output"""
-    self.volume = self.__GetVolume()
-    self.mixer.setvolume(0)
+    self.pa.MuteSink(self.sink)
 
   def Unmute(self):
     """Umute volume output"""
-    self.mixer.setvolume(self.volume)
+    self.pa.UnmuteSink(self.sink)
 
   def SetVolume(self, val):
     """Set volume level to value in range 0%-100%"""
     if (val > 100): val = 100
     if (val < 0): val = 0
-    self.mixer.setvolume(val)
+    self.pa.SetSinkVolume(self.sink, val)
     self.volume = self.__GetVolume()
 
   def Exit(self):

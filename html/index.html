@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Music Player</title>
+  <link rel="stylesheet" href="themes/base/jquery.ui.all.css">
+  <script src="jquery-1.10.2.js"></script>
+  <script src="player.js"></script>
+  <script src="ui/jquery.ui.widget.js"></script>
+  <script src="ui/jquery.ui.progressbar.js"></script>
+  <script src="ui/jquery.ui.mouse.js"></script>
+  <script src="ui/jquery.ui.button.js"></script>
+  <script src="ui/jquery.ui.slider.js"></script>
+  <script src="ui/jquery.ui.dialog.js"></script>
+  <script src="ui/jquery.ui.core.js"></script>
+  <script src="ui/jquery.ui.selectable.js"></script>
+  <script>
+  
+  // Setup player controller elements
+  $(function(){
+
+    // Volume control slider
+    $("#eq").each(function() {
+      var value = parseInt($(this).text());
+      $(this).empty().slider({
+        value: value,
+        range: "min",
+        animate: "fast",
+        change: function( event, ui ) {
+          player.setVolume( ui.value );
+        }
+      });
+    });
+
+    // Track progress
+    $("#progressbar").progressbar({
+      value: 0
+    });
+
+    $(".buttonset > button").button()
+    .next()
+    .button({
+      text: false,
+      icons: {
+        primary: "ui-icon-triangle-1-s"
+      }
+    })
+    .parent()
+    .buttonset();
+
+    $('#power').button({
+      text: false,
+      icons: {
+        primary: 'ui-icon-power'
+      }
+    });
+    $('#beginning').button({
+      text: false,
+      icons: {
+        primary: 'ui-icon-seek-start'
+      }
+    });
+    $('#rewind').button({
+      text: false,
+      icons: {
+        primary: 'ui-icon-seek-prev'
+      }
+    });
+    $('#play').button({
+      text: false,
+      icons: {
+        primary: 'ui-icon-play',
+      }
+    });
+    $('#stop').button({
+      text: false,
+      icons: {
+        primary: 'ui-icon-stop'
+      }
+    });
+    $('#forward').button({
+      text: false,
+      icons: {
+        primary: 'ui-icon-seek-next'
+      }
+    });
+    $('#end').button({
+      text: false,
+      icons: {
+        primary: 'ui-icon-seek-end'
+      }
+    });
+    $("#shuffle").button();
+    $("#repeat").buttonset();
+
+    // Install button click functions
+    $('#power').click(function() {
+      player.togglePower();
+    });
+    $('#shuffle').click(function() {
+      player.shuffle(this.checked);
+    });
+    $('#beginning').click(function() {
+      player.back()
+    });
+    $('#play').click(function() {
+      player.play();
+    });
+    $('#stop').click(function() {
+      player.stop()
+    });
+    $('#end').click(function() {
+      player.skip()
+    });
+    $('#send').click(function() {
+      var utt = $('#command').val();
+      player.sendUtterance(utt);
+    });
+    $('#clear').click(function() {
+      player.clear();
+    });
+    $('#reset').click(function() {
+      $('#command').val('')
+    });
+    $('#pl-selectable').selectable({
+      stop: function() {
+        $('.ui-selected', this).each(function() {
+          var idx = $('#pl-selectable li').index(this);
+          player.resetPos(idx);
+        });
+      }
+    });
+    $('#si-selectable').selectable({
+      stop: function() {
+        $('.ui-selected', this).each(function() {
+          var idx = $('#si-selectable li').index(this);
+          player.setSink(idx);
+        });
+      }
+    });
+
+    // Google speech to text
+    recognizing = false;
+    finalResult = "";
+    interimResult = "";
+    $('#dialog').dialog({autoOpen: false});
+    $('#speak').click(function() {
+      if (!('webkitSpeechRecognition' in window)) {
+        $('#dialog').dialog('open');
+      } else {
+        if (recognizing) {
+          recog.stop();
+          return;
+        }
+        recog = new webkitSpeechRecognition();
+        recog.continuous = true;
+        recog.interimResults = false;
+        recog.lang = 'en-GB';
+        recog.onresult = function(event) {
+          for (var i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+              interimResult = ""
+              finalResult = event.results[i][0].transcript.trim();
+              $('#command').val(finalResult);
+              player.sendUtterance(finalResult);
+            } else {
+              interimResult += event.results[i][0].transcript;
+              $('#command').val(interimResult);
+            }
+          }
+        }
+        recog.onstart = function() {
+          recognizing = true;
+          finalResult = ""
+          interimResult = ""
+          $('#speak').text('Stop');
+        }
+        recog.onerror = function(event) {
+        }
+        recog.onend = function(event) {
+          recognizing = false;
+          recog.stop();
+          $('#speak').text('Speak');
+        }
+        recog.start();
+      }
+    });
+
+    // Install music player event callbacks
+    player.setEventNotifier(player.EVENT_TRACK_POSITION, function(max, pos) {
+      $("#progressbar").progressbar('option', 'max', max);
+      $("#progressbar").progressbar('option', 'value', pos);
+    });
+    player.setEventNotifier(player.EVENT_PLAY_STATE, function(isPlaying) {
+      if (isPlaying) {
+        $("#play").button('option', 'icons', { primary: 'ui-icon-pause' });
+      } else {
+        $("#play").button('option', 'icons', { primary: 'ui-icon-play' });
+      }
+    });
+    player.setEventNotifier(player.EVENT_VOLUME, function(vol) {
+      $("#eq").slider('option', 'value', vol);
+    });
+    player.setEventNotifier(player.EVENT_TRACK_INFO, function(info) {
+      if (info) {
+        text = info['name']+ " | "
+        text += info['album']+" | "
+        text += info['artists']
+      } else {
+        text = "No track currently playing\n"
+      }
+      $('#trackInfo').text(text)
+    });
+    player.setEventNotifier(player.EVENT_TRACK_IMAGE, function(img) {
+      var html = ""
+      if (img) {
+        html = '<img src="' + img + '">';
+      }
+      $("#trackImage").html(html);
+    });
+    player.setEventNotifier(player.EVENT_PLAYLIST,
+                            function(playlist, curPos, imgCache) {
+      var itemStart = '<li id="';
+      var itemClassNormal = ' class="ui-widget-content">';
+      var itemClassHighlighted = ' class="ui-widget-content ui-selected">';
+      var itemEnd = '</li>';
+      var imgStart = '<img style="vertical-align:middle; padding-right:5px" width=20 height=20 src="';
+      var imgEnd = '">';
+      var html = '';
+      if (playlist) {
+        var idx = 0;
+        playlist.forEach(function(item) {
+          html += itemStart + "entry" + idx + '"';
+          if (curPos == idx) {
+            html += itemClassHighlighted;
+          } else {
+            html += itemClassNormal;
+          }
+          var uri = item['link'];
+          if (uri in imgCache) {
+            html += imgStart + imgCache[uri] + imgEnd;
+          }
+          function trunc(text, sz) {
+            if (text.length > sz) {
+              var abbrev = "...";
+              return text.substring(0, (sz - abbrev.length)) + abbrev;
+            }
+            return text;
+          }
+          function concat(name, album, artist, sz) {
+            var sep = " | ";
+            var totalLen = name.length + album.length + artist.length +
+                           (2 * sep.length);
+            if (totalLen > sz) {
+              var m = Math.round((sz - (2 * sep.length)) / 3);
+              return trunc(name, m) + sep + trunc(album, m) + sep +
+                     trunc(artist, m);
+            } else {
+              return name + sep + album + sep + artist;
+            }
+          };
+          html += concat(item['name'], item['album'], item['artists'], 70);
+          html += itemEnd;
+          idx += 1;
+        });
+      }
+      $('#pl-selectable').html(html);
+    });
+    player.setEventNotifier(player.EVENT_SINKS_UPDATED,
+                            function(sinks, curPos) {
+      var itemStart = '<li id="';
+      var itemClassNormal = ' class="ui-widget-content">';
+      var itemClassHighlighted = ' class="ui-widget-content ui-selected">';
+      var itemEnd = '</li>';
+      var html = "";
+      if (sinks) {
+        var idx = 0;
+        sinks.forEach(function(item) {
+          html += itemStart + "sink" + idx + '"';
+          if (curPos == idx) {
+            html += itemClassHighlighted;
+          } else {
+            html += itemClassNormal;
+          }
+          html += sinks[idx]['name'] + " | " + sinks[idx]['id'];
+          html += itemEnd;
+          idx++;
+        });
+      }
+      $('#si-selectable').html(html);
+    });
+    player.setEventNotifier(player.EVENT_SHUFFLE, function(state) {
+      $('#shuffle').prop('checked', state);
+    });
+    player.setUrl(window.location.pathname, 2000); // Refresh 2000ms
+  });
+
+  </script>
+  <style>
+    /* Generic */
+    body{ font: 60% "Trebuchet MS", sans-serif; margin: 20px;}
+    .playerHeaders { margin-top: 1em; clear:both; }
+    /* Progress bar */
+    #progressbar { margin-bottom: 5px; padding: 2px; height: 5px; width: 374px }
+     /* Volume control */
+    .volume { height: 10px; width: 380px; margin-top:3px }
+    .nowPlaying { clear:both; float:right; width: 300px }
+    #toolbar { padding: 10px 4px; }
+    ul#icons {margin: 0; padding: 0;}
+    ul#icons li {margin: 2px; position: relative; padding: 4px 0; cursor: pointer; float: left;  list-style: none;}
+    ul#icons span.ui-icon {float: left; margin: 0 4px;}
+    .buttonset {margin-bottom: 5px; }
+    /* Playlist */
+    #pl-selectable .ui-selecting { background: #FECA40; }
+    #pl-selectable .ui-selected { background: #F39814; color: white; }
+    #pl-selectable { list-style-type: none; margin: 0; padding: 0; width: 60%; }
+    #pl-selectable li { margin: 3px; padding: 0.4em; font-size: 1.4em; height: 18px; }
+    /* Sinks */
+    #si-selectable .ui-selecting { background: #FECA40; }
+    #si-selectable .ui-selected { background: #F39814; color: white; }
+    #si-selectable { list-style-type: none; margin: 0; padding: 0; width: 60%; }
+    #si-selectable li { margin: 3px; padding: 0.4em; font-size: 1.4em; height: 18px; }
+  </style>
+</head>
+<body>
+
+<!-- Player controls -->
+<h2 class="playerHeaders">Controls</h2>
+
+<!-- Track Information -->
+<div id="trackImage" class="nowPlaying"></div>
+<h2 id="trackInfo" class="nowPlaying"></h2>
+
+<!-- Progress bar -->
+<div id="progressbar"></div>
+
+<!-- Controls -->
+<span id="toolbar" class="ui-widget-header ui-corner-all">
+  <input type="checkbox" id="power" /><label for="power">power on/off</label>
+  <button id="beginning">go to beginning</button>
+  <button id="play">play/pause</button>
+  <button id="stop">stop</button>
+  <button id="end">go to end</button>
+
+  <input type="checkbox" id="shuffle" /><label for="shuffle">Shuffle</label>
+
+  <span id="repeat">
+    <input type="radio" id="repeat0" name="repeat" checked="checked" /><label for="repeat0">No Repeat</label>
+    <input type="radio" id="repeat1" name="repeat" /><label for="repeat1">Once</label>
+    <input type="radio" id="repeatall" name="repeat" /><label for="repeatall">All</label>
+  </span>
+</span>
+
+<!-- Volume slider -->
+<div class="volume">
+  <div id="eq" class="slider">
+  <span>100</span>
+  </div>
+</div>
+
+<!-- Commands -->
+<h2>Commands</h2>
+<input id="command" type="text">
+<button id="speak">Speak</button>
+<button id="send">Send</button>
+<button id="reset">Reset</button>
+<button id="clear">Playlist Clear</button>
+
+<!-- Sinks -->
+<h2>Sinks</h2>
+<ol id="si-selectable">
+</ol>
+
+<!-- Playlist -->
+<h2>Playlist</h2>
+<ol id="pl-selectable">
+</ol>
+
+<!-- Misc -->
+<div id="dialog" title="No Speech Recognition Detected">
+<p>Your browser does not support this feature.  Please upgrade your browser.</p>
+</div>
+
+</body>
+</html>

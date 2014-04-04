@@ -38,11 +38,12 @@ class MusicOutcome(WitAiOutcome):
     volume = "(volume)"
     shuffle = "(shuffle)"
     reset = "(reset)"
+    sink = "(sink)"
     image = "(image)"
     info = "(info)"
     navi = "(skip|back)"
     obj = " (track|playlist|playlisthash)"
-    cmd = "(back|skip|stop|pause|resume|play|reset|clear|preview|quit|exit|stats|info|mute|unmute|louder|quieter|volume|shuffle)"
+    cmd = "(back|skip|stop|pause|resume|play|reset|clear|preview|quit|exit|stats|info|mute|unmute|louder|quieter|volume|shuffle|sink)"
     x = " (.+)"
     num = " (\d+)"
     onOff = " (on|off)"
@@ -90,6 +91,8 @@ class MusicOutcome(WitAiOutcome):
       ("^"+image+x+"$", 'V_x', ['uri']),
       ("^set "+volume+num+"$", 'V_x', ['volume']),
       ("^"+volume+num+"$", 'V_x', ['volume']),
+      ("^set "+sink+num+"$", 'V_x', ['sink']),
+      ("^"+sink+num+"$", 'V_x', ['sink']),
       ("^"+info+obj+"$", 'V_x', ['object']),
       ("^"+navi+num+"$", 'V_x', ['number']),
       ("^"+reset+num+"$", 'V_x', ['position']),

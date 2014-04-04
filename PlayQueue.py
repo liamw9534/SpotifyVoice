@@ -19,10 +19,11 @@ import random
 
 class PlayQueue():
 
-  def __init__(self, session, callback=None):
+  def __init__(self, session, callback=None, sink=0):
     self.queue = []
     self.indexes = []
     self.index = 0
+    self.sink = 0
     self.shuffleOn = False
     self.session = session
     self.session.NotifyCallback(self.__Callback)
@@ -45,6 +46,9 @@ class PlayQueue():
     self.SkipForward()
     if (self.userCallback):
       self.userCallback()
+
+  def SetSink(self, sink):
+    self.sink = sink
 
   def Insert(self, results):
     self.indexes = [i+len(results) for i in self.indexes]
@@ -126,7 +130,7 @@ class PlayQueue():
     self.Stop()
     if (self.QueueSize() > 0):
       t = spotify.Track(self.queue[self.QueueIndex()]).load()
-      self.session.PlayTrack(t)
+      self.session.PlayTrack(t, sink=self.sink)
 
   def __repr__(self):
     return repr(self.__dict__)
