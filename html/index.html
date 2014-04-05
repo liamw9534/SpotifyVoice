@@ -267,7 +267,7 @@
       $('#pl-selectable').html(html);
     });
     player.setEventNotifier(player.EVENT_SINKS_UPDATED,
-                            function(sinks, curPos) {
+                            function(sinks) {
       var itemStart = '<li id="';
       var itemClassNormal = ' class="ui-widget-content">';
       var itemClassHighlighted = ' class="ui-widget-content ui-selected">';
@@ -277,7 +277,7 @@
         var idx = 0;
         sinks.forEach(function(item) {
           html += itemStart + "sink" + idx + '"';
-          if (curPos == idx) {
+          if (sinks[idx]['isDefault']) {
             html += itemClassHighlighted;
           } else {
             html += itemClassNormal;

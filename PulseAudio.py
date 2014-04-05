@@ -14,7 +14,7 @@ IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 PARTICULAR PURPOSE.
 """
 
-import sys, re, subprocess
+import sys, re, subprocess, hashlib
 
 class PulseAudioExceptionSinkIndexNotFound:
   """Exception raised when a sink index is passed which is not found"""
@@ -37,14 +37,38 @@ class PulseAudio:
 
   def __UpdateInfo(self):
     """Update info dictionary"""
+    out = PulseAudio.__GetPulseAudioList()
+    self.pulse = PulseAudio.__ParseAudioList(out)
     out = PulseAudio.__GetPulseAudioInfo()
-    self.pulseInfo = PulseAudio.__Parse(out)
+    self.pulse['Info'] = PulseAudio.__ParseAudioInfo(out)
+    # Mark all 'isDefault' fields as false
+    for i in self.pulse['Sink']:
+      i['isDefault'] = False
+    for i in self.pulse['Source']:
+      i['isDefault'] = False
+    # Identify default source and sinks and mark isDefault as true
+    defaultSink = self.__GetObjectByNameValue('Sink', 'Name', \
+                                              self.pulse['Info']['Default Sink'])
+    defaultSink['isDefault'] = True
+    defaultSrc = self.__GetObjectByNameValue('Source', 'Name', \
+                                             self.pulse['Info']['Default Source'])
+    defaultSrc['isDefault'] = True
 
   def __GetObjectByIndex(self, obj, index):
     """Helper function to retrieve an object from info dictionary by type and index"""
-    for i in self.pulseInfo[obj]:
+    for i in self.pulse[obj]:
       try:
-        if (i['index'] == str(index)):
+        if (i['index'] == index):
+          return i
+      except:
+        pass
+    return None
+
+  def __GetObjectByNameValue(self, obj, name, value):
+    """Helper function to retrieve an object from info dictionary by type and index"""
+    for i in self.pulse[obj]:
+      try:
+        if (i[name] == value):
           return i
       except:
         pass
@@ -55,6 +79,13 @@ class PulseAudio:
     """Helper function to set sink volume level"""
     cmd = ['pactl', 'set-sink-volume', str(index), str(vol)+'%']
     PulseAudio.__ShellCmd(cmd)
+
+  def ComputeHash(self, x):
+    md5 = hashlib.md5()
+    for i in x:
+      for j in i.keys():
+        md5.update(str(i[j]))
+    return md5.hexdigest()
 
   def SetSinkVolume(self, sink, vol):
     """Set volume level for sink object obtained by GetSink()"""
@@ -75,6 +106,10 @@ class PulseAudio:
       PulseAudio.__SetDefaultSink(sink['index'])
     else:
       raise PulseAudioExceptionSinkIndexNotFound
+
+  def GetDefaultSink(self):
+    self.__UpdateInfo()
+    return self.__GetObjectByNameValue('Sink', 'isDefault', True)
 
   @staticmethod
   def __SetSinkMute(index, val):
@@ -98,10 +133,10 @@ class PulseAudio:
   def GetSink(self, index):
     """Obtain a sink object by index number"""
     self.__UpdateInfo()
-    sink = self.__GetObjectByIndex('Sink', index)
+    sink = self.__GetObjectByIndex('Sink', str(index))
     if (sink): 
       return {'name':sink['device.description'], 'id':sink['device.string'],
-              'index':sink['index']}
+              'index':sink['index'], 'isDefault':sink['isDefault']}
     else:
       raise PulseAudioExceptionSinkIndexNotFound
 
@@ -110,12 +145,13 @@ class PulseAudio:
     self.__UpdateInfo()
     try:
       return [{'name':sink['device.description'], 'id':sink['device.string'],
-               'index':sink['index']} for sink in self.pulseInfo['Sink']]
+               'index':sink['index'], 'isDefault':sink['isDefault']} \
+               for sink in self.pulse['Sink']]
     except:
       return []
 
   @staticmethod
-  def __GetOrderedList(vol):
+  def __GetOrderedPair(vol):
     """Some properies are lists, like volume control e.g., 0: 50%  1: 50%"""
     return re.findall(':\s+(\d+)', vol)
 
@@ -124,13 +160,19 @@ class PulseAudio:
     self.__UpdateInfo()
     sink = self.__GetObjectByIndex('Sink', sink['index'])
     try:
-      return PulseAudio.__GetOrderedList(sink['Volume'])
+      return PulseAudio.__GetOrderedPair(sink['Volume'])
     except:
       return None
 
   @staticmethod
-  def __GetPulseAudioInfo():
+  def __GetPulseAudioList():
     cmd = ['pactl', 'list']
+    out = PulseAudio.__ShellCmd(cmd)
+    return out
+
+  @staticmethod
+  def __GetPulseAudioInfo():
+    cmd = ['pactl', 'info']
     out = PulseAudio.__ShellCmd(cmd)
     return out
 
@@ -141,7 +183,20 @@ class PulseAudio:
     return text.strip()
 
   @staticmethod
-  def __Parse(buf):
+  def __ParseAudioInfo(buf):
+    """Parse info from 'pactl info'"""
+    lines = buf.split('\n')
+    tab = {}
+    for line in lines:
+      line = line.strip()
+      r = re.findall('^([\w|\s]+): (.*)$', line)   # E.g., Default Sink: ...
+      if (r):
+        tup = r[0]
+        tab[tup[0]] = tup[1]
+    return tab
+
+  @staticmethod
+  def __ParseAudioList(buf):
     """Parse the list of objects from 'pactl list'"""
     lines = buf.split('\n')
     tab = {}

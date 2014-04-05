@@ -47,9 +47,6 @@ parser.add_option("-r", "--port", dest="port",
 parser.add_option("-s", "--addr", dest="addr",
                   help="Server IP address",
                   action="store", default="127.0.0.1", type="string")
-parser.add_option("-e", "--dev", dest="dev",
-                  help="Pulse audio sink index",
-                  action="store", default=0, type="int")
 parser.add_option("-o", "--root", dest="root",
                   help="HTTP server root directory",
                   action="store", default="html", type="string")
@@ -87,7 +84,7 @@ def NewTrackIndication():
   trackCount += 1
 
 # Create play queue
-pq = PlayQueue(m, NewTrackIndication, options.dev)
+pq = PlayQueue(m, NewTrackIndication)
 
 def UnicodeToAscii(u):
   table = { 0x2018:0x27, 0x2019:0x27, 0x201C:0x22, 0x201D:0x22 }
@@ -216,13 +213,14 @@ def ProcessOutcome(outcome):
     msg.AddStatus(MusicStatus.STATUS_OK)
     msg += {'volume':curVol}
   elif intent == 'sink':
-    sink = outcome.GetEntity('sink')
-    if (sink):
-      pq.SetSink(int(sink))
+    index = outcome.GetEntity('sink')
+    pa = PulseAudio()
+    if (index):
+      sink = pa.GetSink(index)
+      pa.SetDefaultSink(sink)
     else:
-      pa = PulseAudio()
       sinks = pa.GetSinks()
-      msg += {'sinks': sinks}
+      msg += {'sinks': sinks, 'hash':pa.ComputeHash(sinks)}
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'louder':
     m.IncrVolume(10)

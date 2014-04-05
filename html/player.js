@@ -19,7 +19,6 @@
   lastShuffle = null,
   sinks = [],
   lastSinks = [],
-  curSink = 0,
   trackState = null,
   lastTrackState = null,
   playlistHash = null,
@@ -30,15 +29,17 @@
 
   var getItem = function(resp, item, def) {
     val = def || null;
-    $.each(resp, function() {
-      $.each(this, function(k, v) {
-        if (k == item) {
-          val = v;
-          return false; // Terminate 'each' here, item found
-        }
-        return true;
+    if (resp) {
+      $.each(resp, function() {
+        $.each(this, function(k, v) {
+          if (k == item) {
+            val = v;
+            return false; // Terminate 'each' here, item found
+          }
+          return true;
+        });
       });
-    });
+    }
     return val;
   };
 
@@ -205,10 +206,15 @@
     lastShuffle = shuffle;
   };
 
+  var hasSinkHashChanged = function() {
+    h1 = getItem(sinks, 'hash', 1);
+    h2 = getItem(lastSinks, 'hash', 2);
+    return h1 != h2
+  }
   var notifySinks = function() {
-    if (player.EVENT_SINKS_UPDATED in callbacks && lastSinks.length != sinks.length) {
+    if (player.EVENT_SINKS_UPDATED in callbacks && hasSinkHashChanged()) {
       var cb = callbacks[player.EVENT_SINKS_UPDATED];
-      cb(sinks, curSink);
+      cb(sinks);
     }
   };
 
@@ -256,7 +262,7 @@
     updateStats();
     updateTrack();
     if (powerOn) {
-      setTimeout(arguments.callee, 1000);
+      setTimeout(arguments.callee, 2000);
     }
   };
 
@@ -332,7 +338,6 @@
     },
     setSink: function(pos) {
       if (powerOn) {
-        curSink = pos;
         musicCommand('sink ' + sinks[pos]['index'], function(data){});
       }
     },

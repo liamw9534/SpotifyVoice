@@ -248,7 +248,7 @@ class SpotifyService():
   def NotifyCallback(self, callback):
     self.notifyCallback = callback
 
-  def PlayTrack(self, track, timeout=1, sink=0):
+  def PlayTrack(self, track, timeout=1):
     """Play a track and initiate audio stream"""
 
     # Stop any tracks already going so we're clean
@@ -262,18 +262,17 @@ class SpotifyService():
 
     # Wait for audio delivery to start before starting audio stream
     if (self.__WaitForAudioDelivery(timeout)):
-      self.__StartAudioStream(sink)
+      self.__StartAudioStream()
     else:
       # No audio delivery event before timeout
       self.Stop()
 
-  def __StartAudioStream(self, sink):
+  def __StartAudioStream(self):
     """Helper function to create audio stream with correct properties"""
     self.stream = AudioStream(self.audioBuffer,
                               self.audioFormat['width'],
                               self.audioFormat['channels'],
-                              self.audioFormat['rate'],
-                              sink)
+                              self.audioFormat['rate'])
     self.stream.Start()
 
   def __StopAudioStream(self):

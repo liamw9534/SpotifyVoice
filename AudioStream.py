@@ -20,13 +20,12 @@ class AudioStream():
   """A simple wrapper around PyAudio which uses the callback mechanism
      (i.e., non-blocking) to drive audio data into the sound device.
   """
-  def __init__(self, buf, width, channels, rate, sink=0):
+  def __init__(self, buf, width, channels, rate):
 
     # PulseAudio
     self.pa = PulseAudio()
-    self.sink = self.pa.GetSink(sink)
+    self.sink = self.pa.GetDefaultSink()
     self.volume = self.__GetVolume()
-    self.pa.SetDefaultSink(self.sink)
 
     # Setup PyAudio and open a stream with the required audio properties
     self.p = pyaudio.PyAudio()
