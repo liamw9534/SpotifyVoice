@@ -306,26 +306,6 @@ class SpotifyService():
     if (self.stream):
       self.stream.Unmute()
 
-  def GetVolume(self):
-    if (self.stream):
-      self.volume = self.stream.GetVolume()
-    return self.volume
-
-  def SetVolume(self, level):
-    self.volume = min(100, level)
-    if (self.stream):
-      self.stream.SetVolume(self.volume)
-
-  def IncrVolume(self, step):
-    self.volume = min(100, self.volume+5)
-    if (self.stream):
-      self.stream.SetVolume(self.volume)
-
-  def DecrVolume(self, step):
-    self.volume = max(0, self.volume-5)
-    if (self.stream):
-      self.stream.SetVolume(self.volume)
-
   def __BytesToSamples(self, nBytes):
       """Helper function to convert nBytes to nSamples"""
       divisor = (self.audioFormat['width'] * self.audioFormat['channels'])

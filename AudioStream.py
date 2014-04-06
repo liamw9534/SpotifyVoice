@@ -13,19 +13,12 @@ PARTICULAR PURPOSE.
 
 import threading
 import pyaudio
-import alsaaudio
-from PulseAudio import PulseAudio
 
 class AudioStream():
   """A simple wrapper around PyAudio which uses the callback mechanism
      (i.e., non-blocking) to drive audio data into the sound device.
   """
   def __init__(self, buf, width, channels, rate):
-
-    # PulseAudio
-    self.pa = PulseAudio()
-    self.sink = self.pa.GetDefaultSink()
-    self.volume = self.__GetVolume()
 
     # Setup PyAudio and open a stream with the required audio properties
     self.p = pyaudio.PyAudio()
@@ -114,28 +107,6 @@ class AudioStream():
   def GetNumUnderruns(self):
     """Returns the number of underrun events that have happened"""
     return self.underruns
-
-  def GetVolume(self):
-    return self.volume
-
-  def __GetVolume(self):
-    vol = self.pa.GetSinkVolume(self.sink)[0]
-    return vol
-
-  def Mute(self):
-    """Mute volume output"""
-    self.pa.MuteSink(self.sink)
-
-  def Unmute(self):
-    """Umute volume output"""
-    self.pa.UnmuteSink(self.sink)
-
-  def SetVolume(self, val):
-    """Set volume level to value in range 0%-100%"""
-    if (val > 100): val = 100
-    if (val < 0): val = 0
-    self.pa.SetSinkVolume(self.sink, val)
-    self.volume = self.__GetVolume()
 
   def Exit(self):
     """Clean-up everything"""

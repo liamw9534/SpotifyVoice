@@ -16,6 +16,7 @@ PARTICULAR PURPOSE.
 """
 
 from __future__ import division
+from __future__ import print_function
 import sys, time, readline, os, threading, codecs
 from optparse import OptionParser
 from MusicDB import MusicDB
@@ -62,7 +63,7 @@ if (options.announce):
   synth = TextToSpeech()
 
 if (not options.user or not options.password):
-  print "You must have a Spotify account and token to use this program."
+  print("You must have a Spotify account and token to use this program.")
   exit()
 
 # Create client session and login
@@ -70,6 +71,9 @@ m = SpotifyService()
 if (m.LoginUser(options.user, options.password) != 0):
   m.Exit()
   exit("Error: Failed to login to Spotify")
+
+# Create pulse audio session
+pa = PulseAudio()
 
 # Create offline music database connection
 if (options.musicDatabase):
@@ -85,6 +89,9 @@ def NewTrackIndication():
 
 # Create play queue
 pq = PlayQueue(m, NewTrackIndication)
+
+def Debug(*objs):
+  print("DEBUG: ", *objs, file=sys.stderr)
 
 def UnicodeToAscii(u):
   table = { 0x2018:0x27, 0x2019:0x27, 0x201C:0x22, 0x201D:0x22 }
@@ -121,7 +128,6 @@ def TrackInfo():
   if (t):
     track = ExpandTrackInfo(m, t)
     text = UnicodeToAscii("Track : " + track['name'] + "; Album : " + track['album'] + "; Artist : " + track['artists'][0])
-    #print text
     if (options.announce):
       synth.SpeakAndWaitUntilFinished(text)
 
@@ -200,21 +206,23 @@ def ProcessOutcome(outcome):
     pq.Clear()
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'mute':
-    m.Mute()
+    sink = pa.GetDefaultSink()
+    pa.MuteSink(sink)
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'unmute':
-    m.Unmute()
+    sink = pa.GetDefaultSink()
+    pa.UnuteSink(sink)
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'volume':
     volume = outcome.GetEntity('volume')
+    sink = pa.GetDefaultSink()
     if (volume):
-      m.SetVolume(int(volume))
-    curVol = m.GetVolume()
+      pa.SetSinkVolume(sink, int(volume))
+    curVol = pa.GetSinkVolume(sink)
+    msg += {'volume':curVol[0]}
     msg.AddStatus(MusicStatus.STATUS_OK)
-    msg += {'volume':curVol}
   elif intent == 'sink':
     index = outcome.GetEntity('sink')
-    pa = PulseAudio()
     if (index):
       sink = pa.GetSink(index)
       pa.SetDefaultSink(sink)
@@ -223,10 +231,16 @@ def ProcessOutcome(outcome):
       msg += {'sinks': sinks, 'hash':pa.ComputeHash(sinks)}
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'louder':
-    m.IncrVolume(10)
+    sink = pa.GetDefaultSink()
+    vol = pa.GetSinkVolume(sink)[0] + 10
+    if (vol > 100): vol = 100
+    pa.SetSinkVolume(sink, vol)
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'quieter':
-    m.DecrVolume(10)
+    sink = pa.GetDefaultSink()
+    vol = pa.GetSinkVolume(sink)[0] - 10
+    if (vol < 0): vol = 0
+    pa.SetSinkVolume(sink, vol)
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'image':
     uri = outcome.GetEntity('uri')
@@ -291,7 +305,7 @@ class MusicHTTPHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
     resp = ProcessOutcome(outcome)
     self.wfile.write(resp)
 
-print "HTTPD running..."
+print("HTTPD running...")
 addr = ('', options.port)
 httpd = MusicHTTPServer(addr, MusicHTTPHandler, documentRoot=options.root)
 httpd.serve_forever()
