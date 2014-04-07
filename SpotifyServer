@@ -26,6 +26,7 @@ from SpotifySearch import SpotifySearch
 from PlayQueue import PlayQueue
 from PulseAudio import PulseAudio
 from MusicMessage import *
+from BluezAudio import BluezAudio
 import json, spotify
 import BaseHTTPServer, SimpleHTTPServer
 
@@ -249,6 +250,29 @@ def ProcessOutcome(outcome):
       artist = LoadArtistImg(uri)
       msg.AddStatus(MusicStatus.STATUS_OK)
       msg += {'albumImage':album, 'artistImage':artist}
+  elif intent == 'scan':
+    blu = BluezAudio()
+    try:
+      devices = blu.ConnectNewDevices()
+    except:
+      devices = []
+    msg += {'devices': devices}
+    msg.AddStatus(MusicStatus.STATUS_OK)
+  elif intent == 'disconnect':
+    blu = BluezAudio()
+    try:
+      candidates = blu.GetConnectedDevices()
+    except:
+      candidates = []
+    devices = []
+    for i in candidates:
+      try:
+        blu.DisconnectDevice(i)
+        devices.append(i)
+      except:
+        pass
+    msg += {'devices': devices}
+    msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'info':
     obj = outcome.GetEntity('object')
     if (obj):
@@ -305,7 +329,7 @@ class MusicHTTPHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
     resp = ProcessOutcome(outcome)
     self.wfile.write(resp)
 
-print("HTTPD running...")
+Debug("HTTPD running...")
 addr = ('', options.port)
 httpd = MusicHTTPServer(addr, MusicHTTPHandler, documentRoot=options.root)
 httpd.serve_forever()

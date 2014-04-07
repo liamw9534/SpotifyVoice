@@ -80,6 +80,12 @@ class PulseAudio:
     cmd = ['pactl', 'set-sink-volume', str(index), str(vol)+'%']
     PulseAudio.__ShellCmd(cmd)
 
+  @staticmethod
+  def __MoveSinkInput(input, index):
+    """Helper function to move a sink input"""
+    cmd = ['pactl', 'move-sink-input', str(input), str(index)]
+    PulseAudio.__ShellCmd(cmd)
+
   def ComputeHash(self, x):
     md5 = hashlib.md5()
     for i in x:
@@ -102,8 +108,13 @@ class PulseAudio:
 
   def SetDefaultSink(self, sink):
     """Set the default sink output to a sink object obtained by GetSink()"""
+    self.__UpdateInfo()
     if (self.__GetObjectByIndex('Sink', sink['index'])):
       PulseAudio.__SetDefaultSink(sink['index'])
+      # Move existing sink input to this device
+      if ('Sink Input' in self.pulse.keys()):
+        input = self.pulse['Sink Input'][0]['index']
+        PulseAudio.__MoveSinkInput(input, sink['index'])
     else:
       raise PulseAudioExceptionSinkIndexNotFound
 
@@ -203,14 +214,15 @@ class PulseAudio:
     h = None
     for line in lines:
       line = line.strip()
-      r = re.findall('^(\w+) #(\d+)$', line)   # E.g., Sink #1, Module #12
+      r = re.findall('^([\w|\s]+)#(\d+)$', line)   # E.g., Sink #1, Module #12
       if (r):
         tup = r[0]
+        name = tup[0].strip()
         h = { "index": tup[1] }
         try:
-          tab[tup[0]].append(h)
+          tab[name].append(h)
         except:
-          tab[tup[0]] = [h]
+          tab[name] = [h]
       if (h):
         r = re.findall('([\w|\.|\s]+): (.*)', line)  # E.g., Properties:
         # E.g., device-bus = "bluetooth"

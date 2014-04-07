@@ -43,7 +43,7 @@ class MusicOutcome(WitAiOutcome):
     info = "(info)"
     navi = "(skip|back)"
     obj = " (track|playlist|playlisthash)"
-    cmd = "(back|skip|stop|pause|resume|play|reset|clear|preview|quit|exit|stats|info|mute|unmute|louder|quieter|volume|shuffle|sink)"
+    cmd = "(back|skip|stop|pause|resume|play|reset|clear|preview|quit|exit|stats|info|mute|unmute|louder|quieter|volume|shuffle|sink|scan|disconnect)"
     x = " (.+)"
     num = " (\d+)"
     onOff = " (on|off)"
