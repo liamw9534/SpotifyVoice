@@ -261,16 +261,14 @@
   var fastEvents = function() {
     updateStats();
     updateTrack();
+    updatePlaylist();
     if (powerOn) {
       setTimeout(arguments.callee, 2000);
     }
   };
 
   var slowEvents = function() {
-    updatePlaylist();
-    updateVolume();
     updateShuffle();
-    updateSinks();
     if (powerOn) {
       setTimeout(arguments.callee, 10000);
     }
@@ -313,6 +311,8 @@
         playlist = [];
         slowEvents();
         fastEvents();
+        updateSinks();
+        updateVolume();
       } else {
         musicCommand('stop', function(data){});
       }
@@ -336,9 +336,27 @@
         musicCommand('reset ' + pos, function(data){});
       }
     },
+    disconnect: function(pos) {
+      if (powerOn) {
+        musicCommand('disconnect', function(data) {
+          updateSinks();
+          updateVolume();
+        });
+      }
+    },
+    scan: function(pos) {
+      if (powerOn) {
+        musicCommand('scan', function(data) {
+          updateSinks();
+          updateVolume();
+        });
+      }
+    },
     setSink: function(pos) {
       if (powerOn) {
-        musicCommand('sink ' + sinks[pos]['index'], function(data){});
+        musicCommand('sink ' + sinks[pos]['index'], function(data) {
+          updateVolume();
+        });
       }
     },
     sendUtterance: function(utterance) {

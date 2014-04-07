@@ -119,6 +119,12 @@
     $('#clear').click(function() {
       player.clear();
     });
+    $('#scan').click(function() {
+      player.scan();
+    });
+    $('#disconnect').click(function() {
+      player.disconnect();
+    });
     $('#reset').click(function() {
       $('#command').val('')
     });
@@ -361,10 +367,14 @@
 <!-- Commands -->
 <h2>Commands</h2>
 <input id="command" type="text">
+<p>
 <button id="speak">Speak</button>
 <button id="send">Send</button>
 <button id="reset">Reset</button>
 <button id="clear">Playlist Clear</button>
+<button id="scan">Scan</button>
+<button id="disconnect">Disconnect</button>
+</p>
 
 <!-- Sinks -->
 <h2>Sinks</h2>
