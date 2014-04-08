@@ -73,8 +73,8 @@ if (m.LoginUser(options.user, options.password) != 0):
   m.Exit()
   exit("Error: Failed to login to Spotify")
 
-# Create pulse audio session
-pa = PulseAudio()
+# Create pulse audio session (pass PID for pulse audio client identification)
+pa = PulseAudio(os.getpid())
 
 # Create offline music database connection
 if (options.musicDatabase):
@@ -275,16 +275,19 @@ def ProcessOutcome(outcome):
       msg.AddStatus(MusicStatus.STATUS_OK)
       msg += {'albumImage':album, 'artistImage':artist}
   elif intent == 'scan':
-    Debug("Scan");
+    Debug("Scanning...");
     blu = BluezAudio()
     try:
       devices = blu.ConnectNewDevices()
+      Debug("Found", len(devices), "devices");
+      if (len(devices) > 0):
+        pa.CombineSinks()  # Create new combined sink output
     except:
       devices = []
     msg += {'devices': devices}
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'disconnect':
-    Debug("Disconnect");
+    Debug("Disconnecting...");
     blu = BluezAudio()
     try:
       candidates = blu.GetConnectedDevices()
@@ -297,6 +300,9 @@ def ProcessOutcome(outcome):
         devices.append(i)
       except:
         pass
+    Debug("Disconnected", len(devices), "devices");
+    if (len(devices) > 0):
+      pa.Restart()
     msg += {'devices': devices}
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'info':

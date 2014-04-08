@@ -168,11 +168,11 @@
       var state = getTrackPlayState();
       var trackUri = getTrackUri();
       trackState = trackUri + "-" + state;
+      resetTrackPosition(data);
       if (lastTrackState != trackState) {
         notifyTrackInfo(state, t);
         notifyPlayState(state);
         notifyCurrentTrackImage(state, trackUri);
-        resetTrackPosition(data);
       }
       lastTrackState = trackState;
     });
@@ -274,9 +274,9 @@
   };
 
   var startPeriodicEvents = function() {
-    updateSinks();
+    updateTrack();
     if (powerOn) {
-      setTimeout(arguments.callee, 60000);
+      setTimeout(arguments.callee, 10000);
     }
   };
 
@@ -315,11 +315,11 @@
         lastPlaylistHash = null;
         track = [];
         playlist = [];
-        startPeriodicEvents();
         updateShuffle();
+        updateSinks();
         updateVolume();
         updatePlaylist();
-        updateTrack();
+        startPeriodicEvents();
         trackPositionTimer();
       } else {
         musicCommand('stop', function(data) {

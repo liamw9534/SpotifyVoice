@@ -14,7 +14,11 @@ IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 PARTICULAR PURPOSE.
 """
 
+from __future__ import print_function
 import sys, re, subprocess, hashlib
+
+def Debug(*objs):
+  print("PulseAudio:", *objs, file=sys.stderr)
 
 class PulseAudioExceptionSinkIndexNotFound:
   """Exception raised when a sink index is passed which is not found"""
@@ -23,14 +27,15 @@ class PulseAudioExceptionSinkIndexNotFound:
 class PulseAudio:
   """PulseAudio wrapper around command-line utilities"""
 
-  def __init__(self):
+  def __init__(self, pid):
     """Initialize object, we just get pulse audio information dictionary"""
+    self.pid = pid
     self.__UpdateInfo()
 
   @staticmethod
   def __ShellCmd(cmd):
     """Shell command helper function"""
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out = p.stdout.read()
     p.wait()
     return out
@@ -44,6 +49,8 @@ class PulseAudio:
     # Mark all 'isDefault' fields as false
     for i in self.pulse['Sink']:
       i['isDefault'] = False
+      if ('device.string' not in i.keys()):
+        i['device.string'] = 'virtual'
     for i in self.pulse['Source']:
       i['isDefault'] = False
     # Identify default source and sinks and mark isDefault as true
@@ -74,6 +81,15 @@ class PulseAudio:
         pass
     return None
 
+  def __GetClientSinkInput(self):
+    """Helper to retrieve a sink input associated with this client"""
+    if ('Sink Input' in self.pulse.keys()):
+      for i in self.pulse['Sink Input']:
+        if ('application.process.id' in i.keys()):
+          if (i['application.process.id'] == str(self.pid)):
+            return i
+    return None
+
   @staticmethod
   def __SetSinkVolume(index, vol):
     """Helper function to set sink volume level"""
@@ -85,6 +101,23 @@ class PulseAudio:
     """Helper function to move a sink input"""
     cmd = ['pactl', 'move-sink-input', str(input), str(index)]
     PulseAudio.__ShellCmd(cmd)
+
+  @staticmethod
+  def __Exit():
+    """Helper function to exit pactl"""
+    cmd = ['pactl', 'exit']
+    PulseAudio.__ShellCmd(cmd)
+
+  @staticmethod
+  def __CombineSinks(name, sinks):
+    """Helper function to create combined output sink"""
+    cmd = ['pactl', 'load-module', 'module-combine-sink', 'sink_name='+name, \
+           'slaves='+sinks]
+    PulseAudio.__ShellCmd(cmd)
+
+  def Restart(self):
+    self.__Exit()
+    self.__UpdateInfo()
 
   def ComputeHash(self, x):
     md5 = hashlib.md5()
@@ -112,9 +145,9 @@ class PulseAudio:
     if (self.__GetObjectByIndex('Sink', sink['index'])):
       PulseAudio.__SetDefaultSink(sink['index'])
       # Move existing sink input to this device
-      if ('Sink Input' in self.pulse.keys()):
-        input = self.pulse['Sink Input'][0]['index']
-        PulseAudio.__MoveSinkInput(input, sink['index'])
+      ip = self.__GetClientSinkInput()
+      if (ip):
+        PulseAudio.__MoveSinkInput(ip['index'], sink['index'])
     else:
       raise PulseAudioExceptionSinkIndexNotFound
 
@@ -122,10 +155,16 @@ class PulseAudio:
     self.__UpdateInfo()
     sink = self.__GetObjectByNameValue('Sink', 'isDefault', True)
     # Move existing sink input to this device
-    if ('Sink Input' in self.pulse.keys()):
-      input = self.pulse['Sink Input'][0]['index']
-      PulseAudio.__MoveSinkInput(input, sink['index'])
+    ip = self.__GetClientSinkInput()
+    if (ip):
+      PulseAudio.__MoveSinkInput(ip['index'], sink['index'])
     return sink
+
+  def CombineSinks(self):
+    self.__UpdateInfo()
+    # Do not combine existing virtual sinks
+    s = [str(i['index']) for i in self.GetSinks() if i['id'] != 'virtual']
+    PulseAudio.__CombineSinks('Combined', ','.join(s))
 
   @staticmethod
   def __SetSinkMute(index, val):
