@@ -17,6 +17,7 @@
   lastVolume = null,
   shuffle = null,
   lastShuffle = null,
+  trackPos = null,
   sinks = [],
   lastSinks = [],
   trackState = null,
@@ -24,7 +25,6 @@
   playlistHash = null,
   lastPlaylistHash = null,
   imageCache = {},
-  refreshPeriod = 5000,
   callbacks = {};
 
   var getItem = function(resp, item, def) {
@@ -56,14 +56,33 @@
              dataType:'json', success:callback });
   };
 
-  var updateStats = function() {
-    musicCommand('stats', function(data) {
-      if (player.EVENT_TRACK_POSITION in callbacks) {
-        var cb = callbacks[player.EVENT_TRACK_POSITION];
-        vals = calcTrackPosition(data);
-        cb(vals[0], vals[1]);
+  var notifyTrackPos = function(data) {
+    var vals = calcTrackPosition(data);
+    if (player.EVENT_TRACK_POSITION in callbacks) {
+      var cb = callbacks[player.EVENT_TRACK_POSITION];
+      cb(vals[0], vals[1]);
+    }
+    return (vals[0] == vals[1]);
+  };
+
+  var trackPositionTimer = function() {
+    var state = getTrackPlayState();
+    if (trackPos && state == 'playing') {
+      // Advance track position by 1s
+      trackPos['total'] += trackPos['rate'];
+      if (notifyTrackPos(trackPos)) {
+        // Track end position detected
+        updateTrack();
       }
-    });
+    }
+    if (powerOn) {
+      setTimeout(arguments.callee, 1000);
+    }
+  };
+
+  var resetTrackPosition = function(data) {
+    trackPos = getItem(data, 'stats');
+    trackPos['total'] -= trackPos['rate']/2;
   };
 
   var notifyPlaylist = function() {
@@ -153,6 +172,7 @@
         notifyTrackInfo(state, t);
         notifyPlayState(state);
         notifyCurrentTrackImage(state, trackUri);
+        resetTrackPosition(data);
       }
       lastTrackState = trackState;
     });
@@ -211,6 +231,7 @@
     h2 = getItem(lastSinks, 'hash', 2);
     return h1 != h2
   }
+
   var notifySinks = function() {
     if (player.EVENT_SINKS_UPDATED in callbacks && hasSinkHashChanged()) {
       var cb = callbacks[player.EVENT_SINKS_UPDATED];
@@ -226,23 +247,17 @@
     lastSinks = sinks;
   };
 
-  var calcTrackPosition = function(data) {
-    var s = getItem(data, 'stats'), totalSamples, occupancy, sampleRate, currMs;
-    if (s) {
-      totalSamples = s['total'];
-      occupancy = s['occupancy'];
-      sampleRate = s['rate'];
-      currMs = Math.round((1000 * (totalSamples-occupancy)) / sampleRate);
-    } else {
-      currMs = 0;
-    }
+  var calcTrackPosition = function(s) {
+    totalSamples = s['total'];
+    occupancy = s['occupancy'];
+    sampleRate = s['rate'];
+    currMs = Math.round((1000 * (totalSamples-occupancy)) / sampleRate);
     if (getItem(track, 'track')) {
       trackLenMs = getItem(track, 'track')['duration'];
     } else {
       trackLenMs = 1;
     }
-
-    return [trackLenMs, currMs];
+    return [trackLenMs, Math.min(currMs, trackLenMs)];
   };
 
   var getTrackPlayState = function() {
@@ -258,19 +273,10 @@
     }
   };
 
-  var fastEvents = function() {
-    updateStats();
-    updateTrack();
-    updatePlaylist();
+  var startPeriodicEvents = function() {
+    updateSinks();
     if (powerOn) {
-      setTimeout(arguments.callee, 2000);
-    }
-  };
-
-  var slowEvents = function() {
-    updateShuffle();
-    if (powerOn) {
-      setTimeout(arguments.callee, 10000);
+      setTimeout(arguments.callee, 60000);
     }
   };
 
@@ -289,9 +295,8 @@
     EVENT_SINKS_UPDATED: 8,
 
     // API Functions
-    setUrl: function(u, r) {
+    setUrl: function(u) {
       url = u;
-      refreshPeriod = r;
     },
     togglePower: function() {
       powerOn = !powerOn;
@@ -299,6 +304,7 @@
         imageCache = {};
         lastShuffle = null;
         shuffle = null;
+        trackPos = null;
         lastSinks = [];
         sinks = [];
         lastVolume = null;
@@ -309,12 +315,16 @@
         lastPlaylistHash = null;
         track = [];
         playlist = [];
-        slowEvents();
-        fastEvents();
-        updateSinks();
+        startPeriodicEvents();
+        updateShuffle();
         updateVolume();
+        updatePlaylist();
+        updateTrack();
+        trackPositionTimer();
       } else {
-        musicCommand('stop', function(data){});
+        musicCommand('stop', function(data) {
+          updateTrack();
+        });
       }
       return powerOn;
     },
@@ -333,7 +343,10 @@
     },
     resetPos: function(pos) {
       if (powerOn) {
-        musicCommand('reset ' + pos, function(data){});
+        trackPos = null;
+        musicCommand('reset ' + pos, function(data) {
+          updateTrack();
+        });
       }
     },
     disconnect: function(pos) {
@@ -361,7 +374,10 @@
     },
     sendUtterance: function(utterance) {
       if (powerOn) {
-        musicCommand(utterance, function(data){});
+        musicCommand(utterance, function(data) {
+          updatePlaylist();
+          updateTrack();
+        });
       }
     },
     setVolume: function(vol) {
@@ -371,33 +387,55 @@
     },
     skip: function() {
       if (powerOn) {
-        musicCommand('skip', function(data){});
+        trackPos = null;
+        musicCommand('skip', function(data) {
+          updateTrack();
+        });
       }
     },
     back: function() {
       if (powerOn) {
-        musicCommand('back', function(data){});
+        trackPos = null;
+        musicCommand('back', function(data) {
+          updateTrack();
+        });
       }
     },
     clear: function() {
       if (powerOn) {
-        musicCommand('clear', function(data){});
+        trackPos = null;
+        musicCommand('clear', function(data) {
+          updatePlaylist();
+          updateTrack();
+        });
       }
     },
     stop: function() {
       if (powerOn) {
-        musicCommand('stop', function(data){});
+        trackPos = null;
+        musicCommand('stop', function(data) {
+          updateTrack();
+        });
       }
     },
     play: function() {
       if (powerOn) {
         state = getTrackPlayState();
         if (state == 'playing') {
-          musicCommand('pause', function(data){});
+          trackPos = null;
+          musicCommand('pause', function(data) {
+            updateTrack();
+          });
         } else if (state == 'paused') {
-          musicCommand('resume', function(data){});
+          trackPos = null;
+          musicCommand('resume', function(data) {
+            updateTrack();
+          });
         } else {
-          musicCommand('play', function(data){});
+          trackPos = null;
+          musicCommand('play', function(data) {
+            updateTrack();
+          });
         }
       }
     }

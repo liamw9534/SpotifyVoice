@@ -120,7 +120,12 @@ class PulseAudio:
 
   def GetDefaultSink(self):
     self.__UpdateInfo()
-    return self.__GetObjectByNameValue('Sink', 'isDefault', True)
+    sink = self.__GetObjectByNameValue('Sink', 'isDefault', True)
+    # Move existing sink input to this device
+    if ('Sink Input' in self.pulse.keys()):
+      input = self.pulse['Sink Input'][0]['index']
+      PulseAudio.__MoveSinkInput(input, sink['index'])
+    return sink
 
   @staticmethod
   def __SetSinkMute(index, val):

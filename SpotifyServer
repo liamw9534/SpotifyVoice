@@ -28,7 +28,7 @@ from PulseAudio import PulseAudio
 from MusicMessage import *
 from BluezAudio import BluezAudio
 import json, spotify
-import BaseHTTPServer, SimpleHTTPServer
+import SocketServer, BaseHTTPServer, SimpleHTTPServer
 
 parser = OptionParser()
 parser.add_option("-u", "--user", dest="user",
@@ -92,7 +92,7 @@ def NewTrackIndication():
 pq = PlayQueue(m, NewTrackIndication)
 
 def Debug(*objs):
-  print("DEBUG: ", *objs, file=sys.stderr)
+  print("SpotifyServer:", *objs, file=sys.stderr)
 
 def UnicodeToAscii(u):
   table = { 0x2018:0x27, 0x2019:0x27, 0x201C:0x22, 0x201D:0x22 }
@@ -110,17 +110,23 @@ def ExpandTrackInfo(session, uri):
   return track
 
 def LoadAlbumImg(uri):
-  track = spotify.Track(uri).load()
-  image = track.album.load().cover()
-  if (image):
-    return image.load().data_uri
+  try:
+    track = spotify.Track(uri).load()
+    image = track.album.load().cover()
+    if (image):
+      return image.load().data_uri
+  except:
+    pass
   return None
 
 def LoadArtistImg(uri):
-  track = spotify.Track(uri).load()
-  image = track.artists[0].load().portrait()
-  if (image):
-    return image.load().data_uri
+  try:
+    track = spotify.Track(uri).load()
+    image = track.artists[0].load().portrait()
+    if (image):
+      return image.load().data_uri
+  except:
+    pass
   return None
 
 # Helper function to announce/show current track information
@@ -145,15 +151,18 @@ def ProcessOutcome(outcome):
     intent = 'Uknown'
     entities = None
   if intent == 'play' and not entities:
+    Debug("Play");
     pq.Play()
     TrackInfo()
     NewTrackIndication()
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'stop':
+    Debug("Stop");
     pq.Stop()
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'shuffle':
     state = outcome.GetEntity('state', None)
+    Debug("Shuffle", state);
     if (state):
       pq.Shuffle(state)
     else:
@@ -162,12 +171,14 @@ def ProcessOutcome(outcome):
     msg += {'shuffle': state}
   elif intent == 'skip':
     number = int(outcome.GetEntity('number', 1))
+    Debug("Skip", number);
     pq.SkipForward(number)
     TrackInfo()
     NewTrackIndication()
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'back':
     number = int(outcome.GetEntity('number', 1))
+    Debug("Back", number);
     pq.SkipBack(number)
     TrackInfo()
     NewTrackIndication()
@@ -184,39 +195,48 @@ def ProcessOutcome(outcome):
     msg.AddStatus(MusicStatus.STATUS_OK)
     msg += {'numTracks': numTracks}
     if (intent == 'play' and numTracks > 0):
+      Debug("Play/insert", numTracks);
       pq.Insert(results)
       pq.ResetPos()
-      pq.Play()
       TrackInfo()
       NewTrackIndication()
     elif (numTracks > 0 and intent == 'insert'):
+      Debug("Insert", numTracks);
       pq.Insert(results)
     elif (numTracks > 0):
+      Debug("Append", numTracks);
       pq.Append(results)
   elif intent == 'reset':
     pos = int(outcome.GetEntity('position', 0))
+    Debug("Reset", pos);
     pq.ResetPos(pos)
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'pause':
+    Debug("Pause");
     pq.Pause()
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'resume':
+    Debug("Resume");
     pq.Resume()
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'clear':
+    Debug("Clear Playlist");
     pq.Clear()
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'mute':
+    Debug("Mute");
     sink = pa.GetDefaultSink()
     pa.MuteSink(sink)
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'unmute':
+    Debug("Unmute");
     sink = pa.GetDefaultSink()
     pa.UnuteSink(sink)
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'volume':
     volume = outcome.GetEntity('volume')
     sink = pa.GetDefaultSink()
+    Debug("Volume", volume);
     if (volume):
       pa.SetSinkVolume(sink, int(volume))
     curVol = pa.GetSinkVolume(sink)
@@ -224,6 +244,7 @@ def ProcessOutcome(outcome):
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'sink':
     index = outcome.GetEntity('sink')
+    Debug("Sink", index);
     if (index):
       sink = pa.GetSink(index)
       pa.SetDefaultSink(sink)
@@ -234,23 +255,27 @@ def ProcessOutcome(outcome):
   elif intent == 'louder':
     sink = pa.GetDefaultSink()
     vol = pa.GetSinkVolume(sink)[0] + 10
+    Debug("Louder", vol);
     if (vol > 100): vol = 100
     pa.SetSinkVolume(sink, vol)
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'quieter':
     sink = pa.GetDefaultSink()
     vol = pa.GetSinkVolume(sink)[0] - 10
+    Debug("Quieter", vol);
     if (vol < 0): vol = 0
     pa.SetSinkVolume(sink, vol)
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'image':
     uri = outcome.GetEntity('uri')
+    Debug("Image", uri);
     if (uri):
       album = LoadAlbumImg(uri)
       artist = LoadArtistImg(uri)
       msg.AddStatus(MusicStatus.STATUS_OK)
       msg += {'albumImage':album, 'artistImage':artist}
   elif intent == 'scan':
+    Debug("Scan");
     blu = BluezAudio()
     try:
       devices = blu.ConnectNewDevices()
@@ -259,6 +284,7 @@ def ProcessOutcome(outcome):
     msg += {'devices': devices}
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'disconnect':
+    Debug("Disconnect");
     blu = BluezAudio()
     try:
       candidates = blu.GetConnectedDevices()
@@ -275,12 +301,14 @@ def ProcessOutcome(outcome):
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'info':
     obj = outcome.GetEntity('object')
+    Debug("Info", obj);
     if (obj):
       status = MusicStatus.STATUS_OK
       if (obj == 'playlist'):
         msg += {'playlist':[ExpandTrackInfo(m, i) for i in pq.GetAllTracks()]}
       elif (obj == 'track'):
-        msg += {'track':ExpandTrackInfo(m, pq.GetCurrentTrack()),'playlistPosition':pq.QueueIndex(), 'state':m.GetPlayState()}
+        stats = m.GetStatistics()
+        msg += {'track':ExpandTrackInfo(m, pq.GetCurrentTrack()),'playlistPosition':pq.QueueIndex(), 'state':m.GetPlayState(), 'stats': {'occupancy':stats[0], 'drops':stats[1], 'percent':stats[2], 'total':stats[3], 'rate':stats[4]}}
       elif (obj == 'playlisthash'):
         msg += {'playlisthash':pq.GetPlaylistHash()}
       else:
@@ -291,6 +319,7 @@ def ProcessOutcome(outcome):
       msg += {'playlist':[ExpandTrackInfo(m, i) for i in pq.GetAllTracks()]}
       msg += {'track':ExpandTrackInfo(m, pq.GetCurrentTrack())}
   elif intent == 'stats':
+    Debug("Stats");
     stats = m.GetStatistics()
     msg.AddStatus(MusicStatus.STATUS_OK)
     msg += {'stats': {'occupancy':stats[0], 'drops':stats[1], 'percent':stats[2], 'total':stats[3], 'rate':stats[4]}}
@@ -298,7 +327,7 @@ def ProcessOutcome(outcome):
   return msg
 
 # HTTP server
-class MusicHTTPServer(BaseHTTPServer.HTTPServer):
+class MusicHTTPServer(SocketServer.ThreadingMixIn, BaseHTTPServer.HTTPServer):
 
   def __init__(self, addr, requestHandlerClass, documentRoot=None):
  

@@ -13,9 +13,14 @@ IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 PARTICULAR PURPOSE.
 """
 
+from __future__ import print_function
 import spotify
 import hashlib
 import random
+import sys
+
+def Debug(*objs):
+  print("PlayQueue:", *objs, file=sys.stderr)
 
 class PlayQueue():
 
@@ -42,6 +47,7 @@ class PlayQueue():
     return items
  
   def __Callback(self):
+    Debug("PlayQueue callback called", self);
     self.SkipForward()
     if (self.userCallback):
       self.userCallback()
@@ -84,6 +90,7 @@ class PlayQueue():
       self.Play()
 
   def Stop(self):
+    Debug("PlayQueue stop");
     self.session.Stop()
 
   def Pause(self):
@@ -123,8 +130,10 @@ class PlayQueue():
     self.Play()
 
   def Play(self):
+    Debug("PlayQueue play");
     self.Stop()
     if (self.QueueSize() > 0):
+      Debug("PlayQueue loading track");
       t = spotify.Track(self.queue[self.QueueIndex()]).load()
       self.session.PlayTrack(t)
 

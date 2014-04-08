@@ -17,11 +17,16 @@ IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A
 PARTICULAR PURPOSE.
 """
 
+from __future__ import print_function
+import sys
 import spotify
 import threading
 from collections import deque
 from AudioBuffer import AudioBuffer
 from AudioStream import AudioStream
+
+def Debug(*objs):
+  print("SpotifyService:", *objs, file=sys.stderr)
 
 class SpotifyService():
   """
@@ -248,24 +253,30 @@ class SpotifyService():
   def NotifyCallback(self, callback):
     self.notifyCallback = callback
 
-  def PlayTrack(self, track, timeout=1):
+  def PlayTrack(self, track, timeout=2):
     """Play a track and initiate audio stream"""
 
     # Stop any tracks already going so we're clean
     self.Stop()
 
-    # Prepare next track to play
-    self.audioBuffer.Flush()
-    self.audioBuffer.Write(chr(0)*4*2*44100)
-    self.session.player.load(track)
-    self.session.player.play()
+    # Retry upto 3 times
+    for i in range(3):
+      # Prepare next track to play
+      self.audioBuffer.Flush()
+      self.audioBuffer.Write(chr(0)*4*2*44100)
+      self.session.player.load(track)
+      self.session.player.play()
 
-    # Wait for audio delivery to start before starting audio stream
-    if (self.__WaitForAudioDelivery(timeout)):
-      self.__StartAudioStream()
-    else:
-      # No audio delivery event before timeout
-      self.Stop()
+      # Wait for audio delivery to start before starting audio stream
+      Debug("Waiting for audio delivery - attempt:", i+1);
+      if (self.__WaitForAudioDelivery(timeout)):
+        Debug("Audio delivery started");
+        self.__StartAudioStream()
+        break
+      else:
+        # No audio delivery event before timeout
+        Debug("Audio delivery timed out");
+        self.Stop()
 
   def __StartAudioStream(self):
     """Helper function to create audio stream with correct properties"""
