@@ -98,25 +98,25 @@
     }
   };
 
-  var getTrackImage = function(trackUri, param, callback) {
-    if (trackUri in imageCache) {
+  var getTrackImage = function(imageUri, param, callback) {
+    if (imageUri in imageCache) {
       // Image is cached, so notify with data from cache
-      callback(false,
+      callback(false, // Cached => false: not a new image
                param,
-               imageCache[trackUri]);
+               imageCache[imageUri]);
     } else {
-      musicCommand('image ' + trackUri, function(data) {
-        imageCache[trackUri] = getItem(data,'albumImage');
-        callback(true,
+      musicCommand('image ' + imageUri, function(data) {
+        imageCache[imageUri] = getItem(data,'image');
+        callback(true, // Not cached => true: a new image
                  param,
-                 imageCache[trackUri]);
+                 imageCache[imageUri]);
       });
     }
   };
 
   var loadPlaylistImages = function() {
     for (var i = 0; i < playlist.length; i++) {
-      uri = playlist[i]['link'];
+      uri = playlist[i]['imageUri']
       getTrackImage(uri, i, function(isNew, idx, image) {
         if (isNew && player.EVENT_PLAYLIST in callbacks) {
           notifyPlaylist();
@@ -125,12 +125,12 @@
     }
   };
 
-  var notifyCurrentTrackImage = function(state, trackUri) {
+  var notifyCurrentTrackImage = function(state, imageUri) {
     if (player.EVENT_TRACK_IMAGE in callbacks) {
       var cb = callbacks[player.EVENT_TRACK_IMAGE];
       cb(null); // Clear current image while new one loads
-      if (trackUri && (state == 'playing' || state == 'paused')) {
-        getTrackImage(trackUri, null, function(isNew, param, img) {
+      if (imageUri && (state == 'playing' || state == 'paused')) {
+        getTrackImage(imageUri, null, function(isNew, param, img) {
           var cb = callbacks[player.EVENT_TRACK_IMAGE];
           cb(img);
         });
@@ -166,13 +166,12 @@
       track = data;
       var t = getItem(track, 'track');
       var state = getTrackPlayState();
-      var trackUri = getTrackUri();
-      trackState = trackUri + "-" + state;
+      trackState = getTrackUri() + "-" + state;
       resetTrackPosition(data);
       if (lastTrackState != trackState) {
         notifyTrackInfo(state, t);
         notifyPlayState(state);
-        notifyCurrentTrackImage(state, trackUri);
+        notifyCurrentTrackImage(state, getTrackImageUri());
       }
       lastTrackState = trackState;
     });
@@ -262,6 +261,15 @@
 
   var getTrackPlayState = function() {
     return getItem(track, 'state', 'stopped');
+  };
+
+  var getTrackImageUri = function() {
+    var t = getItem(track, 'track');
+    if (t) {
+      return t['imageUri'];
+    } else {
+      return null;
+    }
   };
 
   var getTrackUri = function() {

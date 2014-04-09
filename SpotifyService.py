@@ -408,14 +408,14 @@ class SpotifyService():
              'year': album.year,
              'type': album.type,
              'link': album.link,
-             'cover': album.cover() }
+             'imageUri': album.cover().link.uri }
 
   def GetArtistInfo(self, artist):
     """Convery artist object to a dict"""
     return { 'is_loaded': artist.is_loaded,
              'name': artist.name,
-             'portrait': artist.portrait(),
-             'link': artist.link }
+             'link': artist.link,
+             'imageUri': artist.portrait().link.uri }
 
   def GetPlaylistInfo(self, playlist):
     """Convery playlist object to a dict"""

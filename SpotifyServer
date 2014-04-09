@@ -82,14 +82,8 @@ if (options.musicDatabase):
 else:
   db = None
 
-trackCount = 0
-lastTrackCount = 0
-def NewTrackIndication():
-  global trackCount
-  trackCount += 1
-
 # Create play queue
-pq = PlayQueue(m, NewTrackIndication)
+pq = PlayQueue(m)
 
 def Debug(*objs):
   print("SpotifyServer:", *objs, file=sys.stderr)
@@ -103,26 +97,16 @@ def ExpandTrackInfo(session, uri):
   if (uri is None):
     return None
   track = session.GetTrackInfo(spotify.Track(uri).load())
-  track['artists'] = [session.GetArtistInfo(a)['name'] for a in track['artists']]
-  track['album'] =  session.GetAlbumInfo(track['album'])['name']
+  track['artists'] = [a.name for a in track['artists']] # Overwritten
+  track['imageUri'] = track['album'].cover().link.uri
+  track['album'] = track['album'].name # Overwritten
   track['link'] = track['link'].uri
-  track.pop('playable',None)
+  track.pop('playable', None)
   return track
 
-def LoadAlbumImg(uri):
+def LoadImage(uri):
   try:
-    track = spotify.Track(uri).load()
-    image = track.album.load().cover()
-    if (image):
-      return image.load().data_uri
-  except:
-    pass
-  return None
-
-def LoadArtistImg(uri):
-  try:
-    track = spotify.Track(uri).load()
-    image = track.artists[0].load().portrait()
+    image = spotify.Image(uri)
     if (image):
       return image.load().data_uri
   except:
@@ -270,10 +254,9 @@ def ProcessOutcome(outcome):
     uri = outcome.GetEntity('uri')
     Debug("Image", uri);
     if (uri):
-      album = LoadAlbumImg(uri)
-      artist = LoadArtistImg(uri)
+      image = LoadImage(uri)
       msg.AddStatus(MusicStatus.STATUS_OK)
-      msg += {'albumImage':album, 'artistImage':artist}
+      msg += { 'image':image }
   elif intent == 'scan':
     Debug("Scanning...");
     blu = BluezAudio()
@@ -356,11 +339,13 @@ class MusicHTTPHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
     self.send_header('Content-Type', 'application/json')
     self.end_headers()
     data = self.rfile.read(int(self.headers.get('content-length', 0)))
+    outcome = None
     try:
       command = json.loads(data)
       outcome = MusicOutcome(command['command'])
     except:
-      outcome = None
+      pass
+    Debug("Got outcome:", outcome)
     resp = ProcessOutcome(outcome)
     self.wfile.write(resp)
 
