@@ -24,6 +24,10 @@ class PulseAudioExceptionSinkIndexNotFound:
   """Exception raised when a sink index is passed which is not found"""
   pass
 
+class PulseAudioExceptionCardNotFound:
+  """Exception raised when a card ID string is passed which is not found"""
+  pass
+
 class PulseAudio:
   """PulseAudio wrapper around command-line utilities"""
 
@@ -89,6 +93,12 @@ class PulseAudio:
           if (i['application.process.id'] == str(self.pid)):
             return i
     return None
+
+  @staticmethod
+  def __SetCardProfile(index, profile):
+    """Helper function to set card profile"""
+    cmd = ['pactl', 'set-card-profile', str(index), profile]
+    PulseAudio.__ShellCmd(cmd)
 
   @staticmethod
   def __SetSinkVolume(index, vol):
@@ -184,6 +194,23 @@ class PulseAudio:
       PulseAudio.__SetSinkMute(sink['index'], 0)
     else:
       raise PulseAudioExceptionSinkIndexNotFound
+
+  def GetCard(self, id):
+    """Obtain a card object by device ID string"""
+    self.__UpdateInfo()
+    card = self.__GetObjectByNameValue('Card', 'device.string', id)
+    if (card):
+      return {'name':card['device.description'], 'id':card['device.string'],
+              'index':card['index']}
+    else:
+      raise PulseAudioExceptionCardNotFound
+
+  def SetCardProfile(self, card, profile):
+    """Set a card's profile"""
+    if (self.__GetObjectByIndex('Card', card['index'])):
+      PulseAudio.__SetCardProfile(card['index'], profile)
+    else:
+      raise PulseAudioExceptionCardNotFound
 
   def GetSink(self, index):
     """Obtain a sink object by index number"""

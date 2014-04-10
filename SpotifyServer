@@ -119,6 +119,7 @@ def TrackInfo():
   if (t):
     track = ExpandTrackInfo(m, t)
     text = UnicodeToAscii("Track : " + track['name'] + "; Album : " + track['album'] + "; Artist : " + track['artists'][0])
+    Debug(text)
     if (options.announce):
       synth.SpeakAndWaitUntilFinished(text)
 
@@ -138,7 +139,6 @@ def ProcessOutcome(outcome):
     Debug("Play");
     pq.Play()
     TrackInfo()
-    NewTrackIndication()
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'stop':
     Debug("Stop");
@@ -158,14 +158,12 @@ def ProcessOutcome(outcome):
     Debug("Skip", number);
     pq.SkipForward(number)
     TrackInfo()
-    NewTrackIndication()
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'back':
     number = int(outcome.GetEntity('number', 1))
     Debug("Back", number);
     pq.SkipBack(number)
     TrackInfo()
-    NewTrackIndication()
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif ((intent == 'search' or intent == 'play' or intent == 'find' or intent == 'insert' or
          intent == 'append') and entities):
@@ -183,7 +181,6 @@ def ProcessOutcome(outcome):
       pq.Insert(results)
       pq.ResetPos()
       TrackInfo()
-      NewTrackIndication()
     elif (numTracks > 0 and intent == 'insert'):
       Debug("Insert", numTracks);
       pq.Insert(results)
@@ -215,7 +212,7 @@ def ProcessOutcome(outcome):
   elif intent == 'unmute':
     Debug("Unmute");
     sink = pa.GetDefaultSink()
-    pa.UnuteSink(sink)
+    pa.UnmuteSink(sink)
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'volume':
     volume = outcome.GetEntity('volume')
@@ -261,13 +258,19 @@ def ProcessOutcome(outcome):
     Debug("Scanning...");
     blu = BluezAudio()
     try:
-      devices = blu.ConnectNewDevices()
-      Debug("Found", len(devices), "devices");
-      if (len(devices) > 0):
+      devices = blu.ScanNewDevices()
+      registered = blu.GetRegisteredDevices()
+      candidates = list(set(devices + registered))
+      connected = blu.ConnectDevices(candidates)
+      Debug("Connected:", connected)
+      if (len(connected) > 0):
+        for i in connected:
+          card = pa.GetCard(i)
+          pa.SetCardProfile(card, 'a2dp') # Setup A2DP profile
         pa.CombineSinks()  # Create new combined sink output
-    except:
-      devices = []
-    msg += {'devices': devices}
+    except Exception as e:
+      Debug("Run-time error during scanning:", e)
+    msg += {'devices': connected}
     msg.AddStatus(MusicStatus.STATUS_OK)
   elif intent == 'disconnect':
     Debug("Disconnecting...");
